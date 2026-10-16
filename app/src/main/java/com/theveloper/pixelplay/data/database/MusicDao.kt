@@ -30,7 +30,7 @@ private fun buildSongTitleSearchMatchQuery(query: String): String {
 
     if (tokens.isEmpty()) return EMPTY_SONG_SEARCH_MATCH_QUERY
 
-    return tokens.joinToString(separator = " AND ") { "title:${it}*" }
+    return tokens.joinToString(separator = " ") { "title:${it}*" }  // implicit AND (#2706)
 }
 
 private fun buildSongSearchMatchQuery(query: String): String {
@@ -43,7 +43,7 @@ private fun buildSongSearchMatchQuery(query: String): String {
 
     if (tokens.isEmpty()) return EMPTY_SONG_SEARCH_MATCH_QUERY
 
-    return tokens.joinToString(separator = " AND ") { "${it}*" }
+    return tokens.joinToString(separator = " ") { "${it}*" }  // implicit AND (#2706)
 }
 
 private const val SONG_DETAIL_PROJECTION = """

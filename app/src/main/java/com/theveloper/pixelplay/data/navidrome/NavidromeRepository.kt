@@ -221,6 +221,7 @@ class NavidromeRepository @Inject constructor(
         }
 
         musicDao.clearAllNavidromeSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear navidrome_songs table (#2691-equivalent)
         dao.clearAllPlaylists()
         _isLoggedInFlow.value = false
     }
@@ -710,6 +711,7 @@ class NavidromeRepository @Inject constructor(
         if (navidromeSongs.isEmpty()) {
             if (existingUnifiedIds.isNotEmpty()) {
                 musicDao.clearAllNavidromeSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear navidrome_songs table (#2691-equivalent)
             }
             return
         }

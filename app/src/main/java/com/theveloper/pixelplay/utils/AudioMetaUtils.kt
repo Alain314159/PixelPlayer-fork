@@ -154,7 +154,9 @@ object AudioMetaUtils {
             normalized.contains("mp4a") -> "m4a"
             normalized.contains("flac") -> "flac"
             normalized.contains("opus") -> "opus"
-            normalized.contains("vorbis") || normalized.contains("ogg") -> "ogg"
+            normalized.contains("vorbis") -> "vorbis"
+            normalized.contains("opus") -> "opus"
+            normalized.contains("ogg") -> "ogg"  // could be Vorbis or Opus — needs codec check (#2578)
             normalized.contains("wav") || normalized.contains("wave") -> "wav"
             normalized.contains("aac") -> "aac"
             normalized.contains("mpeg") || normalized.contains("mp3") -> "mp3"

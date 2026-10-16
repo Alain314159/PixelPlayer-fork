@@ -185,6 +185,7 @@ class JellyfinRepository @Inject constructor(
         }
 
         musicDao.clearAllJellyfinSongs()
+        dao.clearAllSongs()  // BUG FIX (#2691): also clear jellyfin_songs table
         dao.clearAllPlaylists()
         _isLoggedInFlow.value = false
     }

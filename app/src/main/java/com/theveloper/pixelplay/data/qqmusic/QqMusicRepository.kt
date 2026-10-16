@@ -267,6 +267,7 @@ class QqMusicRepository @Inject constructor(
         }
         
         musicDao.clearAllQqMusicSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear qqmusic_songs table (#2691-equivalent)
         _isLoggedInFlow.value = false
     }
 
@@ -634,6 +635,7 @@ class QqMusicRepository @Inject constructor(
         if (qqMusicSongs.isEmpty()) {
             if (existingUnifiedIds.isNotEmpty()) {
                 musicDao.clearAllQqMusicSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear qqmusic_songs table (#2691-equivalent)
             }
             return
         }

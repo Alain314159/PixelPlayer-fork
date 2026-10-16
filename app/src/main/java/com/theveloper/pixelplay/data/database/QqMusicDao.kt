@@ -48,4 +48,8 @@ interface QqMusicDao {
 
     @Query("DELETE FROM qqmusic_playlists WHERE id = :playlistId")
     suspend fun deletePlaylist(playlistId: Long)
+
+    // BUG FIX (#2691-equivalent): clear all QQ Music songs on logout
+    @Query("DELETE FROM qqmusic_songs")
+    suspend fun clearAllSongs()
 }

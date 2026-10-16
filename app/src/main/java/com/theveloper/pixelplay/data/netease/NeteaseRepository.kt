@@ -191,6 +191,7 @@ class NeteaseRepository @Inject constructor(
         }
         
         musicDao.clearAllNeteaseSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear netease_songs table (#2691-equivalent)
         _isLoggedInFlow.value = false
     }
 
@@ -659,6 +660,7 @@ class NeteaseRepository @Inject constructor(
         if (neteaseSongs.isEmpty()) {
             if (existingUnifiedNeteaseIds.isNotEmpty()) {
                 musicDao.clearAllNeteaseSongs()
+        dao.clearAllSongs()  // BUG FIX: also clear netease_songs table (#2691-equivalent)
             }
             return
         }
