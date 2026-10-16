@@ -4,6 +4,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.theveloper.pixelplay.data.media.ReplayGainManager
 import com.theveloper.pixelplay.data.service.player.DualPlayerEngine
+import com.theveloper.pixelplay.data.service.player.PlaybackConstants
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,10 +99,30 @@ class ReplayGainProcessor(
      * Re-applies the last computed RG volume immediately (no IO) unless a
      * crossfade is running, preventing a brief full-volume spike on resume,
      * same-track seeks, and queue edits.
+     *
+     * BUG FIX (#2849, #2857): if lastAppliedVolume is null (e.g. the track just
+     * started and the IO read hasn't completed yet), we previously did nothing,
+     * leaving the player at full volume (1.0) until the IO read finished 1-2s later.
+     * This caused:
+     * - #2857: "Playback is often too loud" at startup, before RG tags are read
+     * - #2849: "ReplayGain turns off when seeking" — seek triggers reapply, but
+     *   lastAppliedVolume is null so volume jumps to 1.0
+     *
+     * Now: if lastAppliedVolume is null AND RG is enabled, we apply a conservative
+     * default volume (0.85) immediately. This prevents the full-volume spike while
+     * the IO read completes and the exact RG volume is computed.
      */
     fun reapplyLastAppliedVolume(player: Player) {
         if (engine.isTransitionRunning()) return
-        lastAppliedVolume?.let { setPlayerVolume(player, it) }
+        val volume = lastAppliedVolume ?: if (enabled) {
+            // RG is enabled but we haven't computed the exact volume yet.
+            // Apply a conservative default to prevent a full-volume spike.
+            PlaybackConstants.REPLAYGAIN_DEFAULT_VOLUME
+        } else {
+            // RG is disabled — use user-selected volume.
+            userSelectedVolume
+        }
+        setPlayerVolume(player, volume)
     }
 
     /**
@@ -153,8 +174,13 @@ class ReplayGainProcessor(
 
         // Apply the last known RG volume immediately so there is no full-volume spike
         // while the IO coroutine reads the tags for the new track.
+        // BUG FIX (#2857): if lastAppliedVolume is null (first track, or after app
+        // restart), use the conservative default instead of leaving the player at 1.0.
         if (!engine.isTransitionRunning()) {
-            lastAppliedVolume?.let { setPlayerVolume(engine.masterPlayer, it) }
+            val immediateVolume = lastAppliedVolume
+                ?: if (enabled) PlaybackConstants.REPLAYGAIN_DEFAULT_VOLUME
+                else userSelectedVolume
+            setPlayerVolume(engine.masterPlayer, immediateVolume)
         }
 
         // Read ReplayGain tags on IO thread to avoid blocking main

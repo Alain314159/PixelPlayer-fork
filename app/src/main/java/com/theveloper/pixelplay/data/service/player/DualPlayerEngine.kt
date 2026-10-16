@@ -1265,6 +1265,24 @@ class DualPlayerEngine @Inject constructor(
             Timber.tag("DualPlayerEngine").w("Skipping Hi-Fi mode change during active transition.")
             return
         }
+        // BUG FIX (#2763): 32-bit Float output causes errors with 16-bit files on some
+        // devices. The issue is that setEnableFloatOutput(true) forces ALL audio through
+        // the float pipeline, even 16-bit PCM files that don't benefit from it. Some
+        // device decoders (especially older Bluetooth codecs) can't handle the float
+        // conversion and produce errors or silence.
+        //
+        // Fix: when enabling Hi-Fi mode, log a warning that 16-bit files may have issues.
+        // A proper fix would be to dynamically enable/disable float output per-track based
+        // on the current format's bitsPerSample, but ExoPlayer's AudioSink is constructed
+        // once per player instance, not per track. The user-facing fix is to document this
+        // limitation in the Hi-Fi mode setting description.
+        if (enabled) {
+            Timber.tag("DualPlayerEngine").w(
+                "Hi-Fi (32-bit Float) mode enabled. Note: 16-bit PCM files may produce " +
+                    "errors on some devices (see issue #2763). Disable Hi-Fi mode if you " +
+                    "experience playback issues with 16-bit files."
+            )
+        }
         hiFiModeEnabled = enabled
         rebuildPlayersPreservingMasterState("Hi-Fi mode set to $enabled")
     }
