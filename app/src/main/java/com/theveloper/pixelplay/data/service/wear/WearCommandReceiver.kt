@@ -30,7 +30,6 @@ import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
 import com.theveloper.pixelplay.shared.WearTransferRequest
 import com.theveloper.pixelplay.shared.WearVolumeCommand
-import com.theveloper.pixelplay.shared.WearVolumeState
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CompletableDeferred
@@ -69,7 +68,6 @@ class WearCommandReceiver : WearableListenerService() {
     @Inject lateinit var directTransferCoordinator: PhoneDirectWatchTransferCoordinator
     @Inject lateinit var transferCancellationStore: PhoneWatchTransferCancellationStore
     @Inject lateinit var transferStateStore: PhoneWatchTransferStateStore
-    @Inject lateinit var wearStatePublisher: WearStatePublisher
 
     private val json = Json { ignoreUnknownKeys = true }
     private var mediaController: MediaController? = null
@@ -118,8 +116,14 @@ class WearCommandReceiver : WearableListenerService() {
             WearPlaybackCommand.PLAY_FROM_CONTEXT -> {
                 handlePlayFromContext(command)
             }
-            WearPlaybackCommand.REQUEST_STATE_REFRESH -> {
-                handleRequestStateRefresh(messageEvent.sourceNodeId)
+            WearPlaybackCommand.PLAY_ITEM -> {
+                handlePlayItem(command)
+            }
+            WearPlaybackCommand.PLAY_NEXT_FROM_CONTEXT -> {
+                handleEnqueueItem(command, playNext = true)
+            }
+            WearPlaybackCommand.ADD_TO_QUEUE_FROM_CONTEXT -> {
+                handleEnqueueItem(command, playNext = false)
             }
             else -> {
                 getOrBuildMediaController { controller ->
@@ -225,6 +229,80 @@ class WearCommandReceiver : WearableListenerService() {
                 }
             } catch (e: Exception) {
                 Timber.tag(TAG).e(e, "Failed to handle PLAY_FROM_CONTEXT")
+            }
+        }
+    }
+
+    /**
+     * Handle PLAY_ITEM: resolve a single song by ID and start playing it immediately.
+     */
+    private fun handlePlayItem(command: WearPlaybackCommand) {
+        val songId = command.songId
+        if (songId == null) {
+            Timber.tag(TAG).w("PLAY_ITEM missing songId")
+            return
+        }
+        scope.launch {
+            try {
+                val song = musicRepository.getSong(songId).first()
+                if (song == null) {
+                    Timber.tag(TAG).w("PLAY_ITEM: song not found for id=%s", songId)
+                    return@launch
+                }
+                val mediaItem = dualPlayerEngine.resolveMediaItem(MediaItemBuilder.build(song))
+                getOrBuildMediaController { controller ->
+                    controller.setMediaItems(listOf(mediaItem), 0, 0L)
+                    controller.prepare()
+                    controller.play()
+                    Timber.tag(TAG).d("PLAY_ITEM: playing %s", song.title)
+                }
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to handle PLAY_ITEM")
+            }
+        }
+    }
+
+    /**
+     * Handle PLAY_NEXT_FROM_CONTEXT / ADD_TO_QUEUE_FROM_CONTEXT: resolve a single song and either
+     * insert it right after the current item or append it to the end of the active queue. If nothing
+     * is queued yet, fall back to starting playback of the song.
+     */
+    private fun handleEnqueueItem(command: WearPlaybackCommand, playNext: Boolean) {
+        val songId = command.songId
+        if (songId == null) {
+            Timber.tag(TAG).w("%s missing songId", command.action)
+            return
+        }
+        scope.launch {
+            try {
+                val song = musicRepository.getSong(songId).first()
+                if (song == null) {
+                    Timber.tag(TAG).w("%s: song not found for id=%s", command.action, songId)
+                    return@launch
+                }
+                val mediaItem = MediaItemBuilder.build(song)
+                // Resolve here (in the coroutine body); getOrBuildMediaController's callback is not a
+                // suspend context. Only the "start now" branch needs the resolved (cloud-ready) item;
+                // enqueued items are resolved later when they become current (matches PLAY_FROM_CONTEXT).
+                val resolvedMediaItem = dualPlayerEngine.resolveMediaItem(mediaItem)
+                getOrBuildMediaController { controller ->
+                    when {
+                        controller.mediaItemCount == 0 -> {
+                            controller.setMediaItems(listOf(resolvedMediaItem), 0, 0L)
+                            controller.prepare()
+                            controller.play()
+                        }
+                        playNext -> {
+                            val insertIndex = (controller.currentMediaItemIndex + 1)
+                                .coerceIn(0, controller.mediaItemCount)
+                            controller.addMediaItem(insertIndex, mediaItem)
+                        }
+                        else -> controller.addMediaItem(mediaItem)
+                    }
+                    Timber.tag(TAG).d("%s: enqueued %s (playNext=%b)", command.action, song.title, playNext)
+                }
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to handle %s", command.action)
             }
         }
     }
@@ -486,71 +564,25 @@ class WearCommandReceiver : WearableListenerService() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         val absoluteValue = command.value
-        when {
-            command.direction == WearVolumeCommand.QUERY -> {
-                // Just report current state — no mutation.
-            }
-            absoluteValue != null -> {
-                // Set absolute volume (scaled from 0-100 to device range)
-                val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                val targetVolume = (absoluteValue * maxVolume / 100).coerceIn(0, maxVolume)
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
-            }
-            else -> {
-                when (command.direction) {
-                    WearVolumeCommand.UP -> audioManager.adjustStreamVolume(
-                        AudioManager.STREAM_MUSIC,
-                        AudioManager.ADJUST_RAISE,
-                        0
-                    )
-                    WearVolumeCommand.DOWN -> audioManager.adjustStreamVolume(
-                        AudioManager.STREAM_MUSIC,
-                        AudioManager.ADJUST_LOWER,
-                        0
-                    )
-                }
+        if (absoluteValue != null) {
+            // Set absolute volume (scaled from 0-100 to device range)
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val targetVolume = (absoluteValue * maxVolume / 100).coerceIn(0, maxVolume)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+        } else {
+            when (command.direction) {
+                WearVolumeCommand.UP -> audioManager.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.ADJUST_RAISE,
+                    0
+                )
+                WearVolumeCommand.DOWN -> audioManager.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.ADJUST_LOWER,
+                    0
+                )
             }
         }
-
-        // Every volume command (including QUERY) replies with the current state so the
-        // watch UI can sync its slider/route info. Wear OS 6 watches rely on this — they
-        // cannot trust their cached copy of the player DataItem at startup.
-        scope.launch { sendCurrentVolumeStateTo(messageEvent.sourceNodeId, audioManager) }
-    }
-
-    private suspend fun sendCurrentVolumeStateTo(nodeId: String, audioManager: AudioManager) {
-        val state = WearVolumeState(
-            level = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
-            max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
-            routeType = WearVolumeState.ROUTE_TYPE_PHONE,
-            routeName = "",
-        )
-        try {
-            val bytes = json.encodeToString(state).toByteArray(Charsets.UTF_8)
-            Wearable.getMessageClient(this@WearCommandReceiver)
-                .sendMessage(nodeId, WearDataPaths.VOLUME_STATE, bytes)
-                .await()
-        } catch (e: Exception) {
-            Timber.tag(TAG).w(e, "Failed to send volume state to %s", nodeId)
-        }
-    }
-
-    /**
-     * Handle a REQUEST_STATE_REFRESH from the watch — typically sent on watch app
-     * startup or right after the watch detects it just became reachable again. We
-     * republish the last known DataItem (if any) and also push a fresh volume state.
-     *
-     * This works around two Wear OS 6 / Android 16 behaviors:
-     *   1. The Wear Data Layer no longer reliably re-delivers cached DataItems to a
-     *      WearableListenerService that wakes up after a system kill.
-     *   2. `NodeClient.getConnectedNodes()` on the watch may temporarily return
-     *      paired-but-unreachable nodes, which races with the listener bind.
-     */
-    private fun handleRequestStateRefresh(sourceNodeId: String) {
-        val republished = wearStatePublisher.republishLastState()
-        Timber.tag(TAG).d("REQUEST_STATE_REFRESH from %s (republished=%b)", sourceNodeId, republished)
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        scope.launch { sendCurrentVolumeStateTo(sourceNodeId, audioManager) }
     }
 
     // ---- Transfer handling ----

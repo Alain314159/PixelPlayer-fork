@@ -945,6 +945,8 @@ class MusicService : MediaLibraryService() {
             return true
         }
 
+        // If hints identify a Wear/remote controller and it's not our app package,
+        // reject to avoid the default Wear system media player hijacking the session.
         val hasWearHints = controller.connectionHints.keySet().any { key ->
             WEAR_HINT_KEY_MARKERS.any { marker ->
                 key.contains(marker, ignoreCase = true)
@@ -2143,10 +2145,17 @@ class MusicService : MediaLibraryService() {
     private var cachedSchemePaletteStyle: AlbumArtPaletteStyle? = null
     private var cachedSchemeColorAccuracy: Int = AlbumArtColorAccuracy.DEFAULT
     private var cachedColorSchemePair: ColorSchemePair? = null
+    // Written from getAlbumArtForWidget (Dispatchers.IO) and read/cleared from the main thread
+    // (onTrimMemory / serviceScope). @Volatile rules out torn reads / stale-visibility across threads.
+    @Volatile
     private var cachedWidgetArtSourceKey: String? = null
+    @Volatile
     private var cachedWidgetArtResolvedUri: String? = null
+    @Volatile
     private var cachedWidgetArtBytes: ByteArray? = null
+    @Volatile
     private var cachedWidgetArtLoadFailureKey: String? = null
+    @Volatile
     private var cachedWidgetArtLoadFailureAtMs: Long = 0L
 
     private fun invalidateCachedWidgetArtwork() {

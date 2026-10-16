@@ -1742,12 +1742,17 @@ class PlayerViewModel @Inject constructor(
         // Initialize connectivity monitoring (WiFi/Bluetooth)
         connectivityStateHolder.initialize()
 
-        // Initialize sleep timer state holder
+        // Initialize sleep timer state holder.
+        // Create the current-song-id flow once and share it; previously the provider built a new
+        // Eagerly-started stateIn() coroutine on every end-of-track toggle, leaking one per cycle.
+        val currentSongIdFlow = stablePlayerState
+            .map { it.currentSong?.id }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
         sleepTimerStateHolder.initialize(
             scope = viewModelScope,
             toastEmitter = { msg -> _toastEvents.emit(msg) },
             mediaControllerProvider = { mediaController },
-            currentSongIdProvider = { stablePlayerState.map { it.currentSong?.id }.stateIn(viewModelScope, SharingStarted.Eagerly, null) },
+            currentSongIdProvider = { currentSongIdFlow },
             songTitleResolver = { songId -> libraryStateHolder.allSongsById.value[songId]?.title ?: "Unknown" }
         )
 
@@ -1926,8 +1931,6 @@ class PlayerViewModel @Inject constructor(
             getUiState = { _playerUiState.value },
             onHideDismissUndoBar = { hideDismissUndoBar() }
         )
-
-        Trace.endSection() // End PlayerViewModel.init
     }
 
     fun onMainActivityStart() {
@@ -2188,7 +2191,7 @@ class PlayerViewModel @Inject constructor(
                 awaitPlayerCollapse()
             }
 
-            _artistNavigationRequests.emit(artistId)
+            _artistNavigationRequests.emit(resolvedId)
         }
     }
 
@@ -2221,6 +2224,269 @@ class PlayerViewModel @Inject constructor(
             _isSheetVisible.value = true
         }
     }
+
+    private fun setPreparingSong(songId: String?) {
+        _playerUiState.update { state ->
+            if (state.preparingSongId == songId) state else state.copy(preparingSongId = songId)
+        }
+    }
+
+    private fun beginPreparingSong(song: Song) {
+        // Skip the "Preparing playback…" pill for local files: they reach STATE_READY
+        // in milliseconds, and transient STATE_BUFFERING from audio HAL/offload init
+        // (or a re-tap of an already-loaded song) can otherwise leave the pill stuck.
+        // Always write the new value (null for local, song.id for remote) so a stale
+        // preparingSongId from a previous remote song cannot outlive a local track switch.
+        if (!isLocalPlaybackSong(song)) {
+            setPreparingSong(song.id)
+        } else {
+            setPreparingSong(null)
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            val albumArtUri = song.albumArtUriString
+            if (albumArtUri.isNullOrBlank()) {
+                themeStateHolder.extractAndGenerateColorScheme(
+                    albumArtUriAsUri = null,
+                    currentSongUriString = null,
+                    isPreload = false
+                )
+            } else {
+                themeStateHolder.extractAndGenerateColorScheme(
+                    albumArtUriAsUri = albumArtUri.toUri(),
+                    currentSongUriString = albumArtUri,
+                    isPreload = false
+                )
+            }
+        }
+    }
+
+    private fun isLocalPlaybackSong(song: Song): Boolean {
+        val scheme = MediaItemBuilder.playbackUri(song).scheme?.lowercase()
+        return scheme == null || scheme in LOCAL_PLAYBACK_SCHEMES
+    }
+
+    private fun clearPreparingSongIfMatching(mediaId: String? = null) {
+        val preparingSongId = _playerUiState.value.preparingSongId ?: return
+        if (mediaId == null || preparingSongId == mediaId) {
+            setPreparingSong(null)
+        }
+    }
+
+    private suspend fun preparePlaybackQueueSegments(
+        songsToPlay: List<Song>,
+        startSongId: String,
+        playlistId: String?
+    ): PreparedPlaybackQueueSegments = withContext(Dispatchers.Default) {
+        val currentIndex = songsToPlay
+            .indexOfFirst { it.id == startSongId }
+            .takeIf { it >= 0 }
+            ?: 0
+
+        val beforeCurrent = List(currentIndex) { index ->
+            buildPlaybackMediaItem(songsToPlay[index], playlistId)
+        }
+        val afterStartIndex = currentIndex + 1
+        val afterCurrent = List((songsToPlay.size - afterStartIndex).coerceAtLeast(0)) { offset ->
+            buildPlaybackMediaItem(songsToPlay[afterStartIndex + offset], playlistId)
+        }
+
+        PreparedPlaybackQueueSegments(
+            beforeCurrent = beforeCurrent,
+            afterCurrent = afterCurrent,
+            currentIndex = currentIndex
+        )
+    }
+
+    private fun attachPreparedQueueSegmentsIfCurrent(
+        player: Player,
+        startSongId: String,
+        preparedSegments: PreparedPlaybackQueueSegments
+    ) {
+        if (player.currentMediaItem?.mediaId != startSongId) return
+        if (player.mediaItemCount != 1) return
+        if (player.getMediaItemAt(0).mediaId != startSongId) return
+
+        if (preparedSegments.beforeCurrent.isNotEmpty()) {
+            player.addMediaItems(0, preparedSegments.beforeCurrent)
+        }
+
+        if (preparedSegments.afterCurrent.isNotEmpty()) {
+            player.addMediaItems(
+                preparedSegments.beforeCurrent.size + 1,
+                preparedSegments.afterCurrent
+            )
+        }
+
+        playbackStateHolder.updateStablePlayerState {
+            it.copy(currentMediaItemIndex = preparedSegments.currentIndex)
+        }
+    }
+
+
+
+    private suspend fun internalPlaySongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
+        if (songsToPlay.isEmpty()) {
+            clearPreparingSongIfMatching()
+            return
+        }
+        val effectiveStartSong = songsToPlay.firstOrNull { it.id == startSong.id } ?: songsToPlay.first()
+
+        // Update dynamic shortcut for last played playlist
+        if (playlistId != null && queueName != "None") {
+            appShortcutManager.updateLastPlaylistShortcut(playlistId, queueName)
+        }
+
+        val castSession = castStateHolder.castSession.value
+        if (castSession != null && castSession.remoteMediaClient != null) {
+            clearPreparingSongIfMatching()
+            val remoteLoaded = castTransferStateHolder.playRemoteQueue(
+                songsToPlay = songsToPlay,
+                startSong = effectiveStartSong,
+                isShuffleEnabled = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
+            )
+
+            if (!remoteLoaded) {
+                Timber.tag(CAST_LOG_TAG).w(
+                    "Remote queue load failed in internalPlaySongs (songId=%s queueSize=%d).",
+                    effectiveStartSong.id,
+                    songsToPlay.size
+                )
+                castSession.remoteMediaClient?.requestStatus()
+                return
+            }
+
+            _playerUiState.update { it.copy(currentPlaybackQueue = songsToPlay.toPlaybackQueue(), currentQueueSourceName = queueName) }
+            playbackStateHolder.updateStablePlayerState {
+                it.copy(
+                    currentSong = effectiveStartSong,
+                    currentMediaItemIndex = 0,
+                    isPlaying = true,
+                    playWhenReady = true,
+                    totalDuration = effectiveStartSong.duration.coerceAtLeast(0L)
+                )
+            }
+        } else {
+            beginPreparingSong(effectiveStartSong)
+            _playerUiState.update {
+                it.copy(
+                    currentPlaybackQueue = songsToPlay.toPlaybackQueue(),
+                    currentQueueSourceName = queueName
+                )
+            }
+            playbackStateHolder.updateStablePlayerState {
+                it.copy(
+                    currentSong = effectiveStartSong,
+                    currentMediaItemIndex = 0,
+                    isPlaying = true,
+                    playWhenReady = true,
+                    totalDuration = effectiveStartSong.duration.coerceAtLeast(0L)
+                )
+            }
+            _isSheetVisible.value = true
+
+            val startMediaItem = buildResolvedPlaybackMediaItem(effectiveStartSong)
+
+            val playSongsAction = {
+                // Use Direct Engine Access to avoid TransactionTooLargeException on Binder
+                dualPlayerEngine.cancelNext()
+                val enginePlayer = dualPlayerEngine.masterPlayer
+
+                enginePlayer.setMediaItem(startMediaItem, 0L)
+                enginePlayer.prepare()
+                enginePlayer.play()
+                _playerUiState.update { it.copy(isLoadingInitialSongs = false) }
+
+                if (songsToPlay.size > 1) {
+                    pendingQueueSegmentsJob?.cancel()
+                    pendingQueueSegmentsJob = viewModelScope.launch {
+                        val preparedSegments = preparePlaybackQueueSegments(
+                            songsToPlay = songsToPlay,
+                            startSongId = effectiveStartSong.id,
+                            playlistId = playlistId
+                        )
+                        withContext(Dispatchers.Main.immediate) {
+                            attachPreparedQueueSegmentsIfCurrent(
+                                player = dualPlayerEngine.masterPlayer,
+                                startSongId = effectiveStartSong.id,
+                                preparedSegments = preparedSegments
+                            )
+                        }
+                    }
+                }
+            }
+
+            // We still check for mediaController to ensure the Service is bound and active
+            // even though we aren't using it for the heavy lifting anymore.
+            if (mediaController == null) {
+                Timber.w("MediaController not available. Queuing playback action.")
+                pendingPlaybackAction = playSongsAction
+            } else {
+                playSongsAction()
+            }
+        }
+    }
+
+    private suspend fun buildResolvedPlaybackMediaItem(song: Song): MediaItem {
+        val mediaItem = MediaItemBuilder.build(song)
+        val originalUri = mediaItem.localConfiguration?.uri ?: return mediaItem
+        val scheme = originalUri.scheme
+        if (
+            scheme != "telegram" &&
+            scheme != "netease" &&
+            scheme != "qqmusic" &&
+            scheme != "navidrome" &&
+            scheme != "jellyfin" &&
+            scheme != "gdrive"
+        ) {
+            return mediaItem
+        }
+
+        if (scheme == "telegram") {
+            ensureTelegramPlaybackObserversStarted()
+        }
+
+        val resolvedUri = dualPlayerEngine.resolveCloudUri(originalUri)
+        return if (resolvedUri == originalUri) {
+            mediaItem
+        } else {
+            mediaItem.buildUpon().setUri(resolvedUri).build()
+        }
+    }
+
+
+    private fun loadAndPlaySong(song: Song) {
+        cancelPendingFullQueuePlayback()
+        beginPreparingSong(song)
+        playbackStateHolder.updateStablePlayerState {
+            it.copy(
+                currentSong = song,
+                isPlaying = true,
+                playWhenReady = true
+            )
+        }
+        _isSheetVisible.value = true
+
+        val controller = mediaController
+        if (controller == null) {
+            pendingPlaybackAction = {
+                loadAndPlaySong(song)
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            val mediaItem = buildResolvedPlaybackMediaItem(song)
+            if (controller.currentMediaItem?.mediaId == song.id) {
+                if (!controller.isPlaying) controller.play()
+            } else {
+                controller.setMediaItem(mediaItem)
+                controller.prepare()
+                controller.play()
+            }
+        }
+    }
+
+// buildMediaMetadataForSong moved to MediaItemBuilder
 
     private fun syncShuffleStateWithSession(enabled: Boolean) {
         val controller = mediaController ?: return
@@ -2379,6 +2645,131 @@ class PlayerViewModel @Inject constructor(
 
     fun addSelectedGenresAsNext(genres: List<Genre>) =
         multiSelectionStateHolder.addSelectedGenresAsNext(genres, selectionActionCallbacks())
+
+                resolvedSelection.songs.forEach(::addSongToQueue)
+
+                if (resolvedSelection.wasTrimmed) {
+                    _toastEvents.emit("Only the first $MAX_ALBUM_BATCH_SELECTION albums were added to queue")
+                } else {
+                    _toastEvents.emit("${resolvedSelection.albums.size} albums added to queue")
+                }
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "Error adding selected albums to queue", e)
+                _toastEvents.emit("Could not add selected albums to queue")
+            }
+        }
+    }
+
+    fun queueAndPlaySelectedAlbums(albums: List<Album>) {
+        playSelectedAlbums(albums)
+    }
+
+    /**
+     * Adds all selected songs to favorites.
+     * Clears selection after liking.
+     */
+    fun likeSelectedSongs(songs: List<Song>) {
+        viewModelScope.launch {
+            val favIds = favoriteSongIds.value.toMutableSet()
+            var likedCount = 0
+            songs.forEach { song ->
+                if (!favIds.contains(song.id)) {
+                    setFavoriteStatusEverywhere(song.id, true)
+                    favIds.add(song.id)
+                    likedCount++
+                }
+            }
+            if (likedCount > 0) {
+                _toastEvents.emit(
+                    context.resources.getQuantityString(R.plurals.n_songs_added_to_favorites, likedCount, likedCount),
+                )
+            } else {
+                _toastEvents.emit(context.getString(R.string.player_all_songs_already_in_favorites))
+            }
+            multiSelectionStateHolder.clearSelection()
+        }
+    }
+
+    /**
+     * Removes all selected songs from favorites.
+     * Clears selection after unliking.
+     */
+    fun unlikeSelectedSongs(songs: List<Song>) {
+        viewModelScope.launch {
+            val favIds = favoriteSongIds.value.toMutableSet()
+            var unlikedCount = 0
+            songs.forEach { song ->
+                if (favIds.contains(song.id)) {
+                    setFavoriteStatusEverywhere(song.id, false)
+                    favIds.remove(song.id)
+                    unlikedCount++
+                }
+            }
+            if (unlikedCount > 0) {
+                _toastEvents.emit(
+                    context.resources.getQuantityString(
+                        R.plurals.n_songs_removed_from_favorites,
+                        unlikedCount,
+                        unlikedCount,
+                    ),
+                )
+            } else {
+                _toastEvents.emit(context.getString(R.string.player_no_songs_were_in_favorites))
+            }
+            multiSelectionStateHolder.clearSelection()
+        }
+    }
+
+    /**
+     * Shares all selected songs as a ZIP file.
+     * Clears selection after initiating share.
+     */
+    fun shareSelectedAsZip(songs: List<Song>) {
+        viewModelScope.launch {
+            _toastEvents.emit(context.getString(R.string.player_creating_zip))
+
+            val result = ZipShareHelper.createAndShareZip(context, songs)
+
+            result.onSuccess {
+                multiSelectionStateHolder.clearSelection()
+            }.onFailure { error ->
+                _toastEvents.emit(
+                    context.getString(R.string.player_share_zip_failed_format, error.localizedMessage ?: ""),
+                )
+                Timber.e(error, "Failed to share zip")
+            }
+        }
+    }
+
+    private suspend fun resolveSelectedAlbumSongs(albums: List<Album>): ResolvedAlbumSelection {
+        val albumsToProcess = albums.take(MAX_ALBUM_BATCH_SELECTION)
+        val wasTrimmed = albums.size > albumsToProcess.size
+
+        val songs = withContext(Dispatchers.IO) {
+            buildList {
+                albumsToProcess.forEach { album ->
+                    val albumSongs = musicRepository.getSongsForAlbum(album.id).first()
+                    if (albumSongs.isNotEmpty()) {
+                        addAll(sortSongsForAlbumSelection(albumSongs))
+                    }
+                }
+            }
+        }
+
+        return ResolvedAlbumSelection(
+            albums = albumsToProcess,
+            songs = songs,
+            wasTrimmed = wasTrimmed
+        )
+    }
+
+    private fun sortSongsForAlbumSelection(songs: List<Song>): List<Song> {
+        return songs.sortedWith(
+            compareBy<Song> { it.discNumber ?: 1 }
+                .thenBy { if (it.trackNumber > 0) it.trackNumber else Int.MAX_VALUE }
+                .thenBy { it.title.lowercase(Locale.getDefault()) }
+        )
+    }
 
     /**
      * Deletes all selected songs from device with confirmation.

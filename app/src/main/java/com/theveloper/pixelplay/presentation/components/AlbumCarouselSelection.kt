@@ -205,7 +205,7 @@ fun AlbumCarouselSection(
                         .aspectRatio(1f)
                         .clickable(
                             enabled = isFocusedItem && song.albumId != -1L,
-                            interactionSource = remember { MutableInteractionSource() },
+                            interactionSource = remember(index) { MutableInteractionSource() },
                             indication = null,
                             onClick = { onAlbumClick(song) }
                         )
