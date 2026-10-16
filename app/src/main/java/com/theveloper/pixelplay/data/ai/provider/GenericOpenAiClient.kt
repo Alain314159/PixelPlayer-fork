@@ -16,10 +16,15 @@ import java.util.concurrent.TimeUnit
  */
 class GenericOpenAiClient(
     private val apiKey: String,
-    private val baseUrl: String,
+    private val _baseUrl: String,
     private val defaultModelId: String,
-    private val providerName: String = "OpenAI"
+    private val _providerName: String = "OpenAI"
 ) : AiClient {
+
+    // Public read-only accessors for testing and diagnostics.
+    val baseUrl: String get() = _baseUrl.takeIf { it.isNotBlank() } ?: ""
+    val defaultModel: String get() = defaultModelId
+    val providerName: String get() = _providerName
     
     @Serializable
     private data class ChatMessage(val role: String, val content: String)
