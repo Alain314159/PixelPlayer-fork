@@ -889,7 +889,18 @@ class MusicService : MediaLibraryService() {
             }
         }
 
-        mediaSession = MediaLibrarySession.Builder(this, engine.masterPlayer, callback)
+        mediaSession = MediaLibrarySession.Builder(
+            this,
+            // BUG FIX (H.3): previously the MediaLibrarySession was built directly on
+            // engine.masterPlayer, which is a "live" reference that gets swapped between
+            // playerA and playerB during every crossfade transition. Listeners attached by
+            // the session (for onMediaItemTransition, onPlayWhenReadyChanged, etc.) were
+            // silently orphaned after each swap, causing the session to appear "stuck" until
+            // the user manually seeked. Wrapping in ForwardingPlayer keeps the session's
+            // listener registration stable across swaps.
+            androidx.media3.common.ForwardingPlayer(engine.masterPlayer),
+            callback
+        )
             .setSessionActivity(getOpenAppPendingIntent())
             .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
             .build()
