@@ -54,12 +54,15 @@ class AiClientFactory @Inject constructor() {
             )
             AiProvider.GLM -> GenericOpenAiClient(
                 apiKey = apiKey,
-                // Z.ai (Zhipu) — official OpenAI-compatible endpoint.
-                // Models: glm-4.6 (latest flagship), glm-4.5-air (lightweight),
-                // glm-4-flash (free tier), glm-4-flashx (faster free tier).
-                // Get API key at https://open.bigmodel.cn/usercenter/apikeys
-                baseUrl = "https://open.bigmodel.cn/api/paas/v4",
-                defaultModelId = "glm-4-flash",
+                // Z.ai (formerly Zhipu AI) — official OpenAI-compatible endpoint.
+                // GLM-5 series launched Feb 2026; GLM-5.3 launched Aug 2026.
+                // Models (as of Oct 2026):
+                //   glm-5-flash       — fast, cheap, good for playlist generation
+                //   glm-5-3-flash     — latest flash, natively multimodal (320B MoE, 18B active)
+                //   glm-5             — full flagship model
+                // Get API key at https://z.ai/ (formerly open.bigmodel.cn)
+                baseUrl = "https://api.z.ai/api/paas/v4",
+                defaultModelId = "glm-5-flash",
                 providerName = "Z.ai (GLM)"
             )
             AiProvider.OPENAI -> GenericOpenAiClient(

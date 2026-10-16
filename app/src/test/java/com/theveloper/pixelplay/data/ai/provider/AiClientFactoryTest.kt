@@ -13,11 +13,11 @@ class AiClientFactoryTest {
     private val factory = AiClientFactory()
 
     @Test
-    fun `GLM creates GenericOpenAiClient with Z ai endpoint and glm-4-flash default`() {
+    fun `GLM creates GenericOpenAiClient with Z ai endpoint and glm-5-flash default`() {
         val client = factory.createClient(AiProvider.GLM, "test-key") as GenericOpenAiClient
 
-        assertEquals("https://open.bigmodel.cn/api/paas/v4", client.baseUrl)
-        assertEquals("glm-4-flash", client.defaultModel)
+        assertEquals("https://api.z.ai/api/paas/v4", client.baseUrl)
+        assertEquals("glm-5-flash", client.defaultModel)
         assertEquals("Z.ai (GLM)", client.providerName)
     }
 
