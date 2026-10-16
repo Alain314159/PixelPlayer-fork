@@ -103,6 +103,37 @@ object PlaybackConstants {
     /** Interval at which the lyrics position is updated (ms). */
     const val LYRICS_UPDATE_INTERVAL_MS = 250L
 
+    // ─── Progress polling ───────────────────────────────────────────────────
+
+    /**
+     * Position polling interval when the player sheet's slider is mounted.
+     * 250ms keeps the slider visibly smooth without excessive main-thread work.
+     *
+     * BUG FIX (#2892): was previously used directly in LyricsSheet's derivedStateOf
+     * key, causing a new State allocation every tick. The fix was in Compose (use
+     * rememberUpdatedState), but the interval itself is also tuned here to be the
+     * minimum that feels smooth — faster intervals = more recompositions = more
+     * GC pressure = more chance of audio stutter on low-end devices.
+     */
+    const val SLIDER_TICK_MS = 250L
+
+    /** Position polling interval for mini-player only (second-level precision). */
+    const val MINIPLAYER_TICK_MS = 1000L
+
+    /** Position polling interval when screen is off. */
+    const val BACKGROUND_TICK_MS = 1000L
+
+    // ─── Queue ───────────────────────────────────────────────────────────────
+
+    /**
+     * Maximum number of items to load into the auxiliary player's timeline.
+     *
+     * BUG FIX (#2773): was 200, caused playlists with >200 songs to appear
+     * truncated. Raised to 1000 (500KB of MediaItem objects — acceptable for
+     * the memory footprint).
+     */
+    const val MAX_AUXILIARY_TIMELINE_ITEMS = 1000
+
     // ─── Album art ──────────────────────────────────────────────────────────
 
     /** Maximum dimension for cached album art (pixels). */

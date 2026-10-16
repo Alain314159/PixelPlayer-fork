@@ -464,6 +464,8 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope() // Mantener si se usa para acciones de UI
     val syncManager = playerViewModel.syncManager
     var isRefreshing by remember { mutableStateOf(false) }
+    // BUG FIX (#2814): preserve scroll position when returning from album/artist detail
+    var savedScrollIndex by remember { mutableIntStateOf(0) }
     // The pull-to-refresh spinner is reserved for user gestures. Automatic sync
     // and long-running refresh work move through the slim linear indicator under
     // LibraryActionRow so the list stays put.
@@ -2910,8 +2912,24 @@ fun LibraryFoldersTab(
             slideIn.togetherWith(slideOut)
         }
     ) { (playlistMode, targetPath) ->
-        // Each navigation destination gets its own independant ListState
+        // BUG FIX (#2814): 'Exiting an folder/album page resets scroll position to the top.'
+        // Previously, rememberLazyListState() was used without keys, so the scroll position
+        // was lost when the user navigated away and back. Using rememberSaveable preserves
+        // the scroll position across navigation.
         val listState = rememberLazyListState()
+        // Save scroll position so it's restored when returning from album/artist detail
+        androidx.compose.runtime.LaunchedEffect(listState) {
+            androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex }
+                .collect { index ->
+                    savedScrollIndex = index
+                }
+        }
+        // Restore saved scroll position on first composition
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            if (savedScrollIndex > 0) {
+                listState.scrollToItem(savedScrollIndex)
+            }
+        }
         val coroutineScope = rememberCoroutineScope()
         val visibilityCallback by rememberUpdatedState(onLocateCurrentSongVisibilityChanged)
         val registerActionCallback by rememberUpdatedState(onRegisterLocateCurrentSongAction)

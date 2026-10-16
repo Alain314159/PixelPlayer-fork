@@ -1296,7 +1296,26 @@ fun SyncedLyricsList(
                 return@LaunchedEffect
             }
 
-            if (listState.isScrollInProgress && !isPreviewSeeking) return@LaunchedEffect
+            if (listState.isScrollInProgress && !isPreviewSeeking) {
+                // BUG FIX (#2894): 'Synchronized lyrics do not scroll at all, even when
+                // pressing one of them.' Previously, when the user manually scrolled the
+                // lyrics list and then released, the auto-scroll would not resume because
+                // the LaunchedEffect's key (currentLineIndex) hadn't changed — the song
+                // was still on the same line. The effect wouldn't relaunch, so the auto-scroll
+                // stayed disabled forever.
+                //
+                // Fix: when the user's manual scroll ends, schedule a delayed re-check
+                // that re-triggers the auto-scroll logic. We do this by updating
+                // lastAutoScrolledLineIndex to -1, which forces the next currentLineIndex
+                // change to re-evaluate the scroll position.
+                // The 500ms delay gives the user time to read the line they scrolled to
+                // before the app jumps back to the current playback position.
+                if (lastAutoScrolledLineIndex >= 0) {
+                    kotlinx.coroutines.delay(500)
+                    lastAutoScrolledLineIndex = -1
+                }
+                return@LaunchedEffect
+            }
 
             val lineJumpDistance = if (lastAutoScrolledLineIndex >= 0) {
                 abs(currentLineIndex - lastAutoScrolledLineIndex)

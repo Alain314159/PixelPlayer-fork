@@ -253,6 +253,11 @@ interface MusicDao {
     @Query("DELETE FROM song_engagements WHERE song_id IN (:songIds)")
     suspend fun deleteEngagementsBySongIds(songIds: List<Long>)
 
+    // BUG FIX (#2845): Delete playback_events for deleted songs so they don't appear in
+    // listening stats / top albums / top artists after the song is gone.
+    @Query("DELETE FROM playback_events WHERE songId IN (:songIds)")
+    suspend fun deletePlaybackEventsBySongIds(songIds: List<Long>)
+
     @Query("SELECT id FROM songs WHERE source_type = 1")
     suspend fun getAllTelegramSongIds(): List<Long>
 
@@ -300,6 +305,11 @@ interface MusicDao {
             // never removed because there was no FK CASCADE on the entities.
             deletePlaylistSongsBySongIds(chunk)
             deleteEngagementsBySongIds(chunk)
+            // BUG FIX (#2845): also delete playback_events for deleted songs so they don't
+            // show up in listening stats / top albums / top artists after the song is gone.
+            // Without this, a song played on repeat before deletion would appear as "most
+            // played" forever even though the user deleted it.
+            deletePlaybackEventsBySongIds(chunk)
             deleteSongsByIds(chunk)
         }
         deleteOrphanedAlbums()
