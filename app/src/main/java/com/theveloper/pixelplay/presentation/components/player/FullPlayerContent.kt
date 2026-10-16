@@ -151,6 +151,7 @@ import kotlinx.coroutines.withContext
 
 private const val PREVIOUS_TRACK_RESTART_THRESHOLD_MS = 10_000L
 private const val SKIP_COMMAND_GUARD_MS = 96L
+private const val PLAYER_SHEET_SETTLED_EXPANDED_FRACTION = 0.985f
 
 private enum class SkipDirection { PREVIOUS, NEXT }
 
@@ -327,6 +328,14 @@ fun FullPlayerContent(
     val isLandscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
+
+    val delayedContentExpandedOverride by remember(currentSheetState, expansionFractionProvider) {
+        derivedStateOf {
+            currentSheetState == PlayerSheetState.EXPANDED &&
+                expansionFractionProvider() >= PLAYER_SHEET_SETTLED_EXPANDED_FRACTION
+        }
+    }
+    val delayedContentTargetExpanded = currentSheetState == PlayerSheetState.EXPANDED
 
     // Lógica para el botón de Lyrics en el reproductor expandido
     val onLyricsClick = {
@@ -506,7 +515,8 @@ fun FullPlayerContent(
             loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
             expansionFractionProvider = expansionFractionProvider,
-            currentSheetState = currentSheetState,
+            isExpandedOverride = delayedContentExpandedOverride,
+            isTargetExpanded = delayedContentTargetExpanded,
             isPlayingProvider = isPlayingProvider,
             playWhenReadyProvider = playWhenReadyProvider,
             placeholderColor = placeholderColor,
@@ -533,6 +543,8 @@ fun FullPlayerContent(
             showPlayerFileInfo = showPlayerFileInfo,
             onSeek = onSeek,
             expansionFractionProvider = expansionFractionProvider,
+            isExpandedOverride = delayedContentExpandedOverride,
+            isTargetExpanded = delayedContentTargetExpanded,
             isPlayingProvider = isPlayingProvider,
             currentSheetState = currentSheetState,
             progressActiveColor = progressActiveColor,
@@ -548,7 +560,8 @@ fun FullPlayerContent(
             loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
             expansionFractionProvider = expansionFractionProvider,
-            currentSheetState = currentSheetState,
+            isExpandedOverride = delayedContentExpandedOverride,
+            isTargetExpanded = delayedContentTargetExpanded,
             placeholderColor = placeholderColor,
             placeholderOnColor = placeholderOnColor,
             isPlayingProvider = isPlayingProvider,
@@ -574,7 +587,8 @@ fun FullPlayerContent(
             loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
             expansionFractionProvider = expansionFractionProvider,
-            currentSheetState = currentSheetState,
+            isExpandedOverride = delayedContentExpandedOverride,
+            isTargetExpanded = delayedContentTargetExpanded,
             placeholderColor = placeholderColor,
             placeholderOnColor = placeholderOnColor,
             isLandscape = false,
@@ -597,7 +611,8 @@ fun FullPlayerContent(
             loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
             expansionFractionProvider = expansionFractionProvider,
-            currentSheetState = currentSheetState,
+            isExpandedOverride = delayedContentExpandedOverride,
+            isTargetExpanded = delayedContentTargetExpanded,
             placeholderColor = placeholderColor,
             placeholderOnColor = placeholderOnColor,
             isLandscape = true,
@@ -1009,7 +1024,8 @@ private fun FullPlayerAlbumCoverSection(
     loadingTweaks: FullPlayerLoadingTweaks,
     isSheetDragGestureActive: Boolean,
     expansionFractionProvider: () -> Float,
-    currentSheetState: PlayerSheetState,
+    isExpandedOverride: Boolean,
+    isTargetExpanded: Boolean,
     isPlayingProvider: () -> Boolean,
     playWhenReadyProvider: () -> Boolean,
     placeholderColor: Color,
@@ -1053,7 +1069,8 @@ private fun FullPlayerAlbumCoverSection(
             isSheetDragGestureActive = isSheetDragGestureActive,
             sharedBoundsModifier = Modifier.fillMaxWidth().height(carouselHeight),
             expansionFractionProvider = expansionFractionProvider,
-            isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+            isExpandedOverride = isExpandedOverride,
+            isTargetExpanded = isTargetExpanded,
             normalStartThreshold = 0.08f,
             delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
             delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
@@ -1111,7 +1128,8 @@ private fun FullPlayerControlsSection(
     loadingTweaks: FullPlayerLoadingTweaks,
     isSheetDragGestureActive: Boolean,
     expansionFractionProvider: () -> Float,
-    currentSheetState: PlayerSheetState,
+    isExpandedOverride: Boolean,
+    isTargetExpanded: Boolean,
     placeholderColor: Color,
     placeholderOnColor: Color,
     isPlayingProvider: () -> Boolean,
@@ -1140,7 +1158,8 @@ private fun FullPlayerControlsSection(
         isSheetDragGestureActive = isSheetDragGestureActive,
         sharedBoundsModifier = Modifier.fillMaxWidth().height(182.dp),
         expansionFractionProvider = expansionFractionProvider,
-        isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+        isExpandedOverride = isExpandedOverride,
+        isTargetExpanded = isTargetExpanded,
         normalStartThreshold = 0.42f,
         delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
         delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
@@ -1207,6 +1226,8 @@ private fun FullPlayerProgressSection(
     showPlayerFileInfo: Boolean,
     onSeek: (Long) -> Unit,
     expansionFractionProvider: () -> Float,
+    isExpandedOverride: Boolean,
+    isTargetExpanded: Boolean,
     isPlayingProvider: () -> Boolean,
     currentSheetState: PlayerSheetState,
     progressActiveColor: Color,
@@ -1243,6 +1264,8 @@ private fun FullPlayerProgressSection(
         showAudioFileInfo = showPlayerFileInfo,
         onSeek = onSeek,
         expansionFractionProvider = expansionFractionProvider,
+        isExpandedOverride = isExpandedOverride,
+        isTargetExpanded = isTargetExpanded,
         isPlayingProvider = isPlayingProvider,
         currentSheetState = currentSheetState,
         activeTrackColor = progressActiveColor,
@@ -1308,7 +1331,8 @@ private fun FullPlayerSongMetadataSection(
     loadingTweaks: FullPlayerLoadingTweaks,
     isSheetDragGestureActive: Boolean,
     expansionFractionProvider: () -> Float,
-    currentSheetState: PlayerSheetState,
+    isExpandedOverride: Boolean,
+    isTargetExpanded: Boolean,
     placeholderColor: Color,
     placeholderOnColor: Color,
     isLandscape: Boolean,
@@ -1332,7 +1356,8 @@ private fun FullPlayerSongMetadataSection(
         isSheetDragGestureActive = isSheetDragGestureActive,
         sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 70.dp),
         expansionFractionProvider = expansionFractionProvider,
-        isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+        isExpandedOverride = isExpandedOverride,
+        isTargetExpanded = isTargetExpanded,
         normalStartThreshold = 0.20f,
         delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
         delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
@@ -1640,6 +1665,8 @@ private fun PlayerProgressBarSection(
     showAudioFileInfo: Boolean,
     onSeek: (Long) -> Unit,
     expansionFractionProvider: () -> Float,
+    isExpandedOverride: Boolean,
+    isTargetExpanded: Boolean,
     isPlayingProvider: () -> Boolean,
     currentSheetState: PlayerSheetState,
     activeTrackColor: Color,
@@ -1774,7 +1801,8 @@ private fun PlayerProgressBarSection(
         isSheetDragGestureActive = isSheetDragGestureActive,
         sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 70.dp),
         expansionFractionProvider = expansionFractionProvider,
-        isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+        isExpandedOverride = isExpandedOverride,
+        isTargetExpanded = isTargetExpanded,
         normalStartThreshold = 0.08f,
         delayAppearThreshold = (loadingTweaks?.contentAppearThresholdPercent ?: 0) / 100f,
         delayCloseThreshold = 1f - ((loadingTweaks?.contentCloseThresholdPercent ?: 0) / 100f),
@@ -1977,6 +2005,7 @@ private fun DelayedContent(
     sharedBoundsModifier: Modifier = Modifier,
     expansionFractionProvider: () -> Float,
     isExpandedOverride: Boolean = false,
+    isTargetExpanded: Boolean = false,
     normalStartThreshold: Float,
     delayAppearThreshold: Float,
     delayCloseThreshold: Float,
@@ -1995,6 +2024,7 @@ private fun DelayedContent(
         switchOnDragRelease,
         isSheetDragGestureActive,
         isExpandedOverride,
+        isTargetExpanded,
         expansionFractionProvider
     ) {
         if (!shouldDelay) {
@@ -2009,6 +2039,8 @@ private fun DelayedContent(
 
             if (isExpandedOverride) {
                 isDelayGateOpen = true
+            } else if (isTargetExpanded) {
+                return@LaunchedEffect
             } else {
                 snapshotFlow { expansionFractionProvider().coerceIn(0f, 1f) }
                     .first { fraction -> fraction <= 0.001f }
