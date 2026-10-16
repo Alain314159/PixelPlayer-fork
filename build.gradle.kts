@@ -14,8 +14,9 @@ plugins {
 allprojects {
     configurations.all {
         resolutionStrategy {
-            force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
-            force("org.jetbrains.kotlinx:kotlinx-metadata-jvm:0.9.0")
+            // Pin kotlin-metadata-jvm to the project's Kotlin version to avoid transitive drift.
+            // Note: kotlinx-metadata-jvm was removed in Kotlin 2.0 and is no longer needed.
+            force("org.jetbrains.kotlin:kotlin-metadata-jvm:${libs.versions.kotlin.get()}")
         }
     }
 }
