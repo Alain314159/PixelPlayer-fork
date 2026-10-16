@@ -250,6 +250,13 @@ class DailyMixManager @Inject constructor(
         songDurationMs: Long = 0L,
         timestamp: Long = System.currentTimeMillis()
     ) {
+        // BUG FIX (8.5): wait for legacy migration to complete before recording. If we
+        // recordPlay while migration is still in progress, the legacy upsertEngagements
+        // (which uses INSERT OR REPLACE) could overwrite the just-recorded play with the
+        // pre-migration legacy data, silently dropping the user's most recent play.
+        // This only blocks on first launch; subsequent calls complete instantly because
+        // the Deferred has already been resolved.
+        migrationDeferred.await()
         engagementDao.recordPlay(
             songId = songId,
             durationMs = songDurationMs.coerceAtLeast(0L),

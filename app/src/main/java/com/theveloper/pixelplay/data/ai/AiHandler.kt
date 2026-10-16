@@ -28,7 +28,10 @@ class AiHandler @Inject constructor(
     @AppScope private val appScope: CoroutineScope
 ) {
     // Cooldown timer: Provider -> Expiry Timestamp
-    private val providerCooldowns = mutableMapOf<AiProvider, Long>()
+    // BUG FIX (I4): mutableMapOf is not thread-safe. Two concurrent generateContent calls
+    // could read stale cooldown values or race on the put. ConcurrentHashMap provides
+    // atomic reads + writes for the typical get/put usage pattern here.
+    private val providerCooldowns = java.util.concurrent.ConcurrentHashMap<AiProvider, Long>()
     private val COOLDOWN_DURATION_MS = 1000L * 60 * 5 // 5 minutes
 
     // Cache TTL: 30 minutes — prevents stale results from being served indefinitely
