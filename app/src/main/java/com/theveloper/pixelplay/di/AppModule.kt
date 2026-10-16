@@ -127,6 +127,8 @@ object AppModule {
             PixelPlayDatabase::class.java,
             "pixelplay_database"
         ).addMigrations(
+            PixelPlayDatabase.MIGRATION_1_2,
+            PixelPlayDatabase.MIGRATION_2_3,
             PixelPlayDatabase.MIGRATION_3_4,
             PixelPlayDatabase.MIGRATION_4_5,
             PixelPlayDatabase.MIGRATION_5_6,

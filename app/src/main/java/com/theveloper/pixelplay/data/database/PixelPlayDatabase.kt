@@ -61,6 +61,18 @@ abstract class PixelPlayDatabase : RoomDatabase() {
         // Gap-bridging no-op migrations for missing version ranges.
         // These versions predate Telegram features; affected tables have since been
         // recreated by later migrations (e.g. 15→16 drops/recreates album_art_themes).
+
+        // BUG FIX (1.2): MIGRATION_1_2 and MIGRATION_2_3 were missing entirely, so any user
+        // who installed an early release (DB v1 or v2) and later upgraded would hit
+        // `IllegalStateException: A migration from 1 to 2 was required but not found` in
+        // release builds (DEBUG builds silently wipe via fallbackToDestructiveMigration).
+        // These are no-op gap bridges because the v3 schema was the first stable one.
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) { /* no-op gap bridge */ }
+        }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) { /* no-op gap bridge */ }
+        }
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) { /* no-op gap bridge */ }
         }
@@ -287,6 +299,13 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                     INSERT OR IGNORE INTO favorites (songId, isFavorite, timestamp)
                     SELECT id, is_favorite, ? FROM songs WHERE is_favorite = 1
                 """, arrayOf(System.currentTimeMillis()))
+
+                // BUG FIX (1.3): install the favorite sync triggers here too, so that users
+                // upgrading through v18-v24 have them in place before v25 (which previously
+                // was the only migration that called installFavoriteSyncTriggers). Without
+                // these triggers, songs.is_favorite would drift out of sync with the
+                // favorites table for users on the v18-v24 schema path.
+                installFavoriteSyncTriggers(db)
             }
         }
 
