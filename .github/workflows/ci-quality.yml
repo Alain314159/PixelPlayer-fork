@@ -1,0 +1,404 @@
+name: CI Quality Gate
+
+# Full quality gate for PixelPlayer-fork: build, lint, format check, unit tests.
+# Triggered on every push to master and on every PR targeting master.
+# Skipped for dependabot PRs (those get their own minimal validation).
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ci-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1: Compile + assemble debug APK for app and wear modules
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (assembleDebug)
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+
+      - name: Assemble :app:debug
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Assemble :wear:debug
+        run: gradle :wear:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload app APK
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pixelplay-app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload wear APK
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pixelplay-wear-debug-apk
+          path: wear/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2: Android Lint (release variant — most thorough)
+  # ─────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Android Lint
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run :app:lintDebug
+        run: gradle :app:lintDebug --no-daemon --stacktrace
+
+      - name: Run :wear:lintDebug
+        run: gradle :wear:lintDebug --no-daemon --stacktrace
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: lint-reports
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+            wear/build/reports/lint-results-*.html
+            wear/build/reports/lint-results-*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Annotate PR with lint errors
+        if: github.event_name == 'pull_request' && always()
+        uses: yutailang0119/action-android-lint@v4
+        with:
+          report-path: |
+            app/build/reports/lint-results-debug.xml
+            wear/build/reports/lint-results-debug.xml
+        continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3: Kotlin code style check with ktlint
+  # ─────────────────────────────────────────────────────────────────────────
+  ktlint:
+    name: Kotlin Style (ktlint)
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run ktlint via gradle plugin
+        # Uses the ktlint-gradle plugin if configured; otherwise download ktlint CLI directly.
+        # The fallback uses the official ktlint_cli jar so we don't need to add a Gradle plugin dep.
+        run: |
+          if gradle tasks --all --no-daemon 2>&1 | grep -q "ktlintCheck"; then
+            gradle ktlintCheck --no-daemon --stacktrace
+          else
+            echo "ktlint plugin not configured — running ktlint CLI directly"
+            mkdir -p .ktlint-cache
+            KTLINT_VERSION="1.5.0"
+            curl -fsSL "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint-${KTLINT_VERSION}.jar" \
+              -o .ktlint-cache/ktlint.jar
+            # Check all Kotlin files except generated and build dirs
+            java -jar .ktlint-cache/ktlint.jar \
+              "app/src/**/*.kt" \
+              "wear/src/**/*.kt" \
+              "shared/src/**/*.kt" \
+              --baseline=.ktlint-baseline.xml \
+              --relative || \
+            java -jar .ktlint-cache/ktlint.jar \
+              "app/src/**/*.kt" \
+              "wear/src/**/*.kt" \
+              "shared/src/**/*.kt" \
+              --relative
+          fi
+
+      - name: Upload ktlint reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ktlint-reports
+          path: |
+            **/build/reports/ktlint/**
+            .ktlint-baseline.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 4: Detekt static analysis (more semantic than ktlint)
+  # ─────────────────────────────────────────────────────────────────────────
+  detekt:
+    name: Static Analysis (detekt)
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run detekt (if configured)
+        run: |
+          if gradle tasks --all --no-daemon 2>&1 | grep -q "detekt"; then
+            gradle detekt --no-daemon --stacktrace
+          else
+            echo "detekt plugin not configured — skipping"
+            echo "To enable detekt, add the io.gitlab.arturbosch.detekt plugin to build.gradle.kts"
+          fi
+
+      - name: Upload detekt reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: detekt-reports
+          path: |
+            **/build/reports/detekt/**
+            .*/detekt-*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 5: Unit tests (all modules)
+  # ─────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run :app:testDebugUnitTest
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Run :wear:testDebugUnitTest
+        run: gradle :wear:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Run :shared:testDebugUnitTest
+        run: gradle :shared:testDebugUnitTest --no-daemon --stacktrace
+        continue-on-error: true  # shared module may have no tests
+
+      - name: Generate JaCoCo coverage report
+        run: gradle :app:jacocoTestReport --no-daemon --stacktrace
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: unit-test-results
+          path: |
+            app/build/reports/tests/testDebugUnitTest/**
+            app/build/test-results/testDebugUnitTest/**
+            wear/build/reports/tests/testDebugUnitTest/**
+            wear/build/test-results/testDebugUnitTest/**
+            shared/build/reports/tests/testDebugUnitTest/**
+            shared/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-reports
+          path: |
+            app/build/reports/jacoco/**
+            app/build/reports/coverage/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish test report to PR
+        if: github.event_name == 'pull_request' && always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Unit Test Results
+          path: |
+            app/build/test-results/testDebugUnitTest/**/*.xml
+            wear/build/test-results/testDebugUnitTest/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+        continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 6: Dependency vulnerability scan
+  # ─────────────────────────────────────────────────────────────────────────
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run dependency vulnerability scan
+        # Uses Gradle's built-in dependency verification + the OSS Index scan
+        run: |
+          # Check for dependency verification failures (config in gradle/verification-metadata.xml)
+          gradle :app:dependencies --configuration releaseRuntimeClasspath --no-daemon 2>&1 | tee deps.log || true
+          # OSS Index scan via gradle plugin if configured
+          if gradle tasks --all --no-daemon 2>&1 | grep -q "auditDependencies"; then
+            gradle auditDependencies --no-daemon --stacktrace
+          else
+            echo "Dependency audit plugin not configured — skipping"
+            echo "To enable, add the org.sonatype.gradle.plugins.scan plugin to build.gradle.kts"
+          fi
+
+      - name: Upload dependency reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dependency-reports
+          path: |
+            **/build/reports/dependency-check/**
+            deps.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 7: Resource shrinking dry-run (catches missing keep rules)
+  # ─────────────────────────────────────────────────────────────────────────
+  shrink-check:
+    name: Resource Shrink Check
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Allow debug release for shrink check (no keystore in CI)
+        env:
+          PIXELPLAYER_ALLOW_DEBUG_RELEASE: "1"
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pixelplay-app-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload R8 mapping file (for crashlytics deobfuscation)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-mapping-file
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 8: Aggregate gate — fails if any upstream job failed
+  # ─────────────────────────────────────────────────────────────────────────
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [build, lint, ktlint, unit-tests]
+    if: always()
+    steps:
+      - name: Check upstream job results
+        if: ${{ needs.build.result != 'success' || needs.lint.result != 'success' || needs.ktlint.result != 'success' || needs.unit-tests.result != 'success' }}
+        run: |
+          echo "❌ Quality gate FAILED — one or more required jobs did not pass"
+          echo "  build:       ${{ needs.build.result }}"
+          echo "  lint:        ${{ needs.lint.result }}"
+          echo "  ktlint:      ${{ needs.ktlint.result }}"
+          echo "  unit-tests:  ${{ needs.unit-tests.result }}"
+          exit 1
+
+      - name: Quality gate passed
+        run: |
+          echo "✅ Quality gate PASSED — all required jobs succeeded"
+          echo "  build:       ${{ needs.build.result }}"
+          echo "  lint:        ${{ needs.lint.result }}"
+          echo "  ktlint:      ${{ needs.ktlint.result }}"
+          echo "  unit-tests:  ${{ needs.unit-tests.result }}"
