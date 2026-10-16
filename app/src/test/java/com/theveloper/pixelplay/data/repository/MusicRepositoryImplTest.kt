@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -179,6 +180,23 @@ class MusicRepositoryImplTest {
         assertTrue(result.isEmpty())
     }
 
+    @Test
+    fun `getAudioFiles suppresses duplicate emissions`() = runTest(testDispatcher) {
+        val songEntities = listOf(
+            createSongEntity(1L, "Song A", "Artist 1", "Pop", "/allowed/path/songA.mp3", "/allowed/path")
+        )
+
+        every { mockMusicDao.getAllSongs(any(), any()) } returns flowOf(songEntities, songEntities)
+        every { mockUserPreferencesRepository.allowedDirectoriesFlow } returns flowOf(setOf("/allowed/path"))
+        every { mockUserPreferencesRepository.blockedDirectoriesFlow } returns flowOf(setOf("/dummy"))
+        coEvery { mockMusicDao.getDistinctParentDirectories() } returns listOf("/allowed/path")
+
+        val emissions = musicRepository.getAudioFiles().toList()
+
+        assertEquals(1, emissions.size)
+        assertEquals(listOf("1"), emissions.first().map { it.id })
+    }
+
     // --- Pruebas para getAlbums ---
     @Test
     fun `getAlbums returns albums from DAO, filtered by songs in allowed directories`() = runTest(testDispatcher) {
@@ -253,6 +271,22 @@ class MusicRepositoryImplTest {
         assertEquals(1, result.size)
         assertEquals(101L, result.first().id)
         assertEquals(2, result.first().songCount)
+    }
+
+    @Test
+    fun `getArtists suppresses duplicate emissions`() = runTest(testDispatcher) {
+        val expectedArtists = listOf(ArtistEntity(101L, "Artist1Name", 2))
+
+        every { mockMusicDao.getArtistsWithSongCountsFiltered(any(), any(), any()) } returns
+            flowOf(expectedArtists, expectedArtists)
+        every { mockUserPreferencesRepository.allowedDirectoriesFlow } returns flowOf(setOf("/allowed"))
+        every { mockUserPreferencesRepository.blockedDirectoriesFlow } returns flowOf(setOf("/dummy"))
+        coEvery { mockMusicDao.getDistinctParentDirectories() } returns listOf("/allowed")
+
+        val emissions = musicRepository.getArtists().toList()
+
+        assertEquals(1, emissions.size)
+        assertEquals(listOf(101L), emissions.first().map { it.id })
     }
 
     @Test

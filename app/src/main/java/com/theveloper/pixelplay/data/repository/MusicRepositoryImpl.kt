@@ -69,6 +69,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -200,7 +202,7 @@ class MusicRepositoryImpl @Inject constructor(
             userPreferencesRepository.blockedDirectoriesFlow
         ) { allowedDirs, blockedDirs ->
             allowedDirs to blockedDirs
-        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+        }.distinctUntilChanged().flatMapLatest { (allowedDirs, blockedDirs) ->
             flow {
                 val (allowedParentDirs, applyDirectoryFilter) =
                     computeAllowedDirs(allowedDirs, blockedDirs)
@@ -214,6 +216,7 @@ class MusicRepositoryImpl @Inject constructor(
         }.map { entities ->
             entities.map { it.toSong() }
         }.distinctUntilChanged().conflate().flowOn(Dispatchers.IO)
+        }.distinctUntilChanged().flowOn(Dispatchers.IO)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -472,7 +475,7 @@ class MusicRepositoryImpl @Inject constructor(
             userPreferencesRepository.blockedDirectoriesFlow
         ) { allowedDirs, blockedDirs ->
             allowedDirs to blockedDirs
-        }.flatMapLatest { (allowedDirs, blockedDirs) ->
+        }.distinctUntilChanged().flatMapLatest { (allowedDirs, blockedDirs) ->
             val (allowedParentDirs, applyFilter) = computeAllowedDirs(allowedDirs, blockedDirs)
             musicDao.getArtistsWithSongCountsFiltered(
                 allowedParentDirs = allowedParentDirs,

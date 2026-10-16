@@ -107,6 +107,7 @@ private fun SongEntity.toSongInternal(artists: List<ArtistRef>): Song {
         title = this.title.normalizeMetadataTextOrEmpty(),
         artist = this.artistName.normalizeMetadataTextOrEmpty(),
         artistId = this.artistId ?: 0L,
+        artistId = this.artistId,
         artists = artists,
         album = this.albumName.normalizeMetadataTextOrEmpty(),
         albumId = this.albumId,
@@ -192,6 +193,7 @@ fun serializeArtistRefs(artists: List<ArtistRef>): String {
         })
     }
     return arr.toString()
+    return toSongInternal(emptyList())
 }
 
 /**
@@ -209,6 +211,8 @@ fun SongEntity.toSongWithArtistRefs(artists: List<ArtistEntity>, crossRefs: List
     }.sortedByDescending { it.isPrimary }
 
     return toSongInternal(artists = artistRefs)
+    
+    return toSongInternal(artistRefs)
 }
 
 fun List<SongEntity>.toSongs(): List<Song> {

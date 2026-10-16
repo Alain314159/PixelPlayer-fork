@@ -24,6 +24,10 @@ interface FavoritesDao {
 
     @Query("SELECT songId FROM favorites WHERE isFavorite = 1 ORDER BY songId")
     fun getFavoriteSongIdsRaw(): Flow<List<Long>>
+    @Query("SELECT songId FROM favorites WHERE isFavorite = 1")
+    fun getFavoriteSongIdsRaw(): Flow<List<Long>>
+
+    fun getFavoriteSongIds(): Flow<List<Long>> = getFavoriteSongIdsRaw().distinctUntilChanged()
 
     fun getFavoriteSongIds(): Flow<List<Long>> = getFavoriteSongIdsRaw().distinctUntilChanged()
 
