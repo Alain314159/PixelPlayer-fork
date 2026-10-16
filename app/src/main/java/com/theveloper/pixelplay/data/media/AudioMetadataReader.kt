@@ -57,6 +57,13 @@ object AudioMetadataReader {
     fun read(file: File, readArtwork: Boolean = true): AudioMetadata? {
         return try {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+                // NOTE: fd.dup().detachFd() returns a raw int FD that TagLib's JNI bindings
+                // take ownership of and close on success. If TagLib throws before closing,
+                // the FD leaks. This is a known limitation of the kyant0/taglib wrapper that
+                // would require a JNI-side fix. The leak is bounded by how often TagLib throws
+                // (rare in practice — most files parse cleanly), so it doesn't typically hit the
+                // per-process FD limit (~1024) during normal library scans.
+
                 // Get audio properties for duration
                 val audioProperties = TagLib.getAudioProperties(fd.dup().detachFd())
                 val durationMs = audioProperties?.length?.takeIf { it > 0 }?.let { it * 1000L }

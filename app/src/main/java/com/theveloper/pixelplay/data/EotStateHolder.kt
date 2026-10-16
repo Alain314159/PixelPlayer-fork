@@ -3,12 +3,16 @@ package com.theveloper.pixelplay.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-// import android.util.Log // Uncomment if logging is needed
 
 /**
  * Singleton object to hold and share the state of the "End of Track" (EOT) timer,
  * specifically which song ID is targeted by an active EOT.
  * This allows communication between PlayerViewModel and MusicService regarding EOT state.
+ *
+ * NOTE: This is intentionally an `object` (process-wide singleton) rather than a `@Singleton`
+ * Hilt-bound class because callers reference it via the bare `EotStateHolder.setEotTargetSong`
+ * accessor in hot paths where Hilt injection would add an indirection. The state held here is
+ * a single MutableStateFlow — process-wide uniqueness is the desired semantics, not a smell.
  */
 object EotStateHolder {
     private val _eotTargetSongId = MutableStateFlow<String?>(null)
