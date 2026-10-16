@@ -73,6 +73,7 @@ class LyricsStateHolder @Inject constructor(
     // source of stuck "Loading lyrics" spinners after config changes.
     private val scope: CoroutineScope get() = appScope
     private var loadingJob: Job? = null
+    @Volatile private var lastLoadedSongId: String? = null
     private var loadCallback: LyricsLoadCallback? = null
     private var syncOffsetObserverJob: Job? = null
 
@@ -126,10 +127,23 @@ class LyricsStateHolder @Inject constructor(
      * Load lyrics for a song.
      * @param song The song to load lyrics for
      * @param sourcePreference The preferred source for lyrics
+     *
+     * BUG FIX (#2889): 'Playlist not working — time turns to 00:00 and lyrics doesn't work.'
+     * When playing a playlist, consecutive song transitions would sometimes not load lyrics
+     * because the LaunchedEffect that calls loadLyricsForSong would relaunch with the same
+     * song (e.g. when the position state updates trigger recomposition). Without a guard,
+     * the network fetch would be cancelled and restarted, sometimes ending with no result.
+     *
+     * Fix: track the last song ID we loaded lyrics for and skip if the same song is
+     * requested again (the lyrics are already loaded). This prevents redundant cancels.
      */
     fun loadLyricsForSong(song: Song, sourcePreference: LyricsSourcePreference) {
+        // Skip if we're already loading/loading for the same song
+        if (lastLoadedSongId == song.id && loadingJob?.isActive == true) return
+
         loadingJob?.cancel()
         val targetSongId = song.id
+        lastLoadedSongId = targetSongId
 
         loadingJob = scope.launch {
             loadCallback?.onLoadingStarted(targetSongId)
