@@ -54,6 +54,46 @@ object AudioMetadataReader {
         }
     }
 
+    /**
+     * Fix strings that were decoded with the wrong charset.
+     *
+     * BUG FIX (#2815): Romanian characters (ă, â, î, ș, ț) were missing
+     * from song titles. Root cause: some ID3v2 tags are encoded in
+     * Windows-1250 (Central European) instead of UTF-8, but TagLib's JNI
+     * wrapper decodes them as UTF-8, producing mojibake or replacement
+     * characters. This function detects common mojibake patterns and
+     * re-decodes the string from Windows-1250 to UTF-8.
+     */
+    private fun fixCharset(input: String?): String? {
+        if (input == null) return null
+        // Check for common mojibake patterns:
+        // - U+FFFD (replacement character) indicates failed UTF-8 decode
+        // - "Äƒ" is "ă" decoded as Latin-1 from UTF-8 (double-encoded)
+        // - "Ã¢" is "â" decoded as Latin-1 from UTF-8
+        if (input.contains('�') ||
+            input.contains("Ä") ||  // ă in mojibake
+            input.contains("Ã¢") ||        // â in mojibake
+            input.contains("Ã®") ||        // î in mojibake
+            input.contains("Ãş") ||   // ș in mojibake
+            input.contains("Ãţ")      // ț in mojibake
+        ) {
+            // Try re-decoding from Latin-1 to get the original bytes,
+            // then decode as Windows-1250 (Central European)
+            return try {
+                val bytes = input.toByteArray(Charsets.ISO_8859_1)
+                String(bytes, Charsets.UTF_8)
+            } catch (_: Exception) {
+                try {
+                    val bytes = input.toByteArray(Charsets.ISO_8859_1)
+                    String(bytes, charset("windows-1250"))
+                } catch (_: Exception) {
+                    input
+                }
+            }
+        }
+        return input
+    }
+
     fun read(file: File, readArtwork: Boolean = true): AudioMetadata? {
         return try {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
@@ -77,16 +117,16 @@ object AudioMetadataReader {
                 // Log ALL keys TagLib returned so we can diagnose mapping issues
                 Timber.tag(TAG).w("TagLib propertyMap keys for ${file.name}: ${propertyMap.keys}")
 
-                val title = propertyMap["TITLE"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val artist = propertyMap["ARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val albumArtist = propertyMap["ALBUMARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val title = fixCharset(propertyMap["TITLE"]?.firstOrNull()?.takeIf { it.isNotBlank() })
+                val artist = fixCharset(propertyMap["ARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() })
+                val albumArtist = fixCharset(propertyMap["ALBUMARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() })
                     ?: propertyMap["ALBUM ARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() }
                     ?: propertyMap["BAND"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val album = propertyMap["ALBUM"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val genre = propertyMap["GENRE"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val composer = propertyMap["COMPOSER"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val album = fixCharset(propertyMap["ALBUM"]?.firstOrNull()?.takeIf { it.isNotBlank() })
+                val genre = fixCharset(propertyMap["GENRE"]?.firstOrNull()?.takeIf { it.isNotBlank() })
+                val composer = fixCharset(propertyMap["COMPOSER"]?.firstOrNull()?.takeIf { it.isNotBlank() })
                     ?: propertyMap["TCOM"]?.firstOrNull()?.takeIf { it.isNotBlank() }
-                val lyrics = propertyMap["LYRICS"]?.firstOrNull()?.takeIf { it.isNotBlank() }
+                val lyrics = fixCharset(propertyMap["LYRICS"]?.firstOrNull()?.takeIf { it.isNotBlank() })
                     ?: propertyMap["UNSYNCEDLYRICS"]?.firstOrNull()?.takeIf { it.isNotBlank() }
                 val trackString = propertyMap["TRACKNUMBER"]?.firstOrNull()?.takeIf { it.isNotBlank() }
                     ?: propertyMap["TRACK"]?.firstOrNull()?.takeIf { it.isNotBlank() }
