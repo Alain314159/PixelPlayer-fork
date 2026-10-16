@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Capabilities advertised by the phone app to the Wear Data Layer.
+
+  This is what allows the Wear OS app to discover the phone as a reachable node
+  via `CapabilityClient.getCapability(PIXELPLAY_PHONE_APP, FILTER_REACHABLE)`.
+
+  On Wear OS 6 (Android 16), `NodeClient.getConnectedNodes()` is no longer a
+  reliable signal — it can return paired-but-unreachable nodes. Capability
+  discovery is the recommended replacement.
+-->
+<resources>
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>pixelplay_phone_app</item>
+    </string-array>
+</resources>

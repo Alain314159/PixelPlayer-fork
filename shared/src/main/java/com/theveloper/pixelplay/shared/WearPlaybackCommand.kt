@@ -49,5 +49,13 @@ data class WearPlaybackCommand(
         const val SET_SLEEP_TIMER_END_OF_TRACK = "set_sleep_timer_end_of_track"
         /** Cancel any active sleep timer. */
         const val CANCEL_SLEEP_TIMER = "cancel_sleep_timer"
+        /**
+         * Ask the phone to republish the current player state (DataItem) and the
+         * current volume state (message). Useful at watch app startup or when the
+         * watch detects the phone has just become reachable again — Wear OS 6 no
+         * longer reliably re-delivers cached DataItems to a freshly started
+         * listener, so we need to actively ask for a refresh.
+         */
+        const val REQUEST_STATE_REFRESH = "request_state_refresh"
     }
 }

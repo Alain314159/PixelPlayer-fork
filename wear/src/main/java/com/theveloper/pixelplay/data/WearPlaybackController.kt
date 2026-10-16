@@ -19,11 +19,16 @@ import javax.inject.Singleton
 /**
  * Sends playback and volume commands to the phone app via the Wear Data Layer MessageClient.
  * Resolves the connected phone node and sends serialized command messages.
+ *
+ * On Wear OS 6 (Android 16) the phone is resolved via [WearConnectivityRepository] (capability
+ * discovery) rather than [com.google.android.gms.wearable.NodeClient.getConnectedNodes], which
+ * no longer reliably reflects reachability on that platform.
  */
 @Singleton
 class WearPlaybackController @Inject constructor(
     private val application: Application,
     private val stateRepository: WearStateRepository,
+    private val connectivityRepository: WearConnectivityRepository,
 ) {
     private val messageClient by lazy { Wearable.getMessageClient(application) }
     private val nodeClient by lazy { Wearable.getNodeClient(application) }
@@ -86,6 +91,16 @@ class WearPlaybackController @Inject constructor(
         )
     )
     fun requestPhoneVolumeState() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.QUERY))
+
+    /**
+     * Ask the phone to republish its current player state (DataItem) and current
+     * volume state (message). Used at watch app startup and whenever the watch
+     * detects the phone has just become reachable again — the Wear Data Layer on
+     * Wear OS 6 does not reliably re-deliver cached DataItems on its own.
+     */
+    fun requestStateRefresh() = sendCommand(
+        WearPlaybackCommand(WearPlaybackCommand.REQUEST_STATE_REFRESH)
+    )
 
     /** Play a song within its context queue (album, artist, playlist, etc.) */
     fun playFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
@@ -156,53 +171,70 @@ class WearPlaybackController @Inject constructor(
     )
 
     private suspend fun sendMessageToPhone(path: String, data: ByteArray): Boolean {
-        try {
-            val nodes = nodeClient.connectedNodes.await()
-            if (nodes.isEmpty()) {
-                stateRepository.setPhoneConnected(false)
-                Timber.tag(TAG).w("No connected nodes found — phone not reachable (path=%s)", path)
-                return false
-            }
-            stateRepository.setPhoneConnected(true)
-            stateRepository.setPhoneDeviceName(nodes.firstOrNull()?.displayName.orEmpty())
-
-            // Send to all connected nodes (typically just one phone)
-            var delivered = false
-            nodes.forEach { node ->
-                try {
-                    Timber.tag(TAG).d(
-                        "Sending message path=%s bytes=%d nodeId=%s nodeName=%s",
-                        path,
-                        data.size,
-                        node.id,
-                        node.displayName
-                    )
-                    messageClient.sendMessage(node.id, path, data).await()
-                    delivered = true
-                    Timber.tag(TAG).d(
-                        "Sent message path=%s nodeId=%s nodeName=%s",
-                        path,
-                        node.id,
-                        node.displayName
-                    )
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(
-                        e,
-                        "Failed to send message path=%s nodeId=%s nodeName=%s",
-                        path,
-                        node.id,
-                        node.displayName
-                    )
-                }
-            }
-            if (!delivered) {
-                stateRepository.setPhoneConnected(false)
-            }
-            return delivered
-        } catch (e: Exception) {
+        val nodes = resolvePhoneNodes()
+        if (nodes.isEmpty()) {
             stateRepository.setPhoneConnected(false)
-            Timber.tag(TAG).e(e, "Failed to get connected nodes for path=%s", path)
+            Timber.tag(TAG).w("No reachable phone node found — phone not reachable (path=%s)", path)
             return false
+        }
+        stateRepository.setPhoneConnected(true)
+        stateRepository.setPhoneDeviceName(nodes.firstOrNull()?.displayName.orEmpty())
+
+        // Send to all reachable phone nodes (typically just one phone)
+        var delivered = false
+        nodes.forEach { node ->
+            try {
+                Timber.tag(TAG).d(
+                    "Sending message path=%s bytes=%d nodeId=%s nodeName=%s",
+                    path,
+                    data.size,
+                    node.id,
+                    node.displayName
+                )
+                messageClient.sendMessage(node.id, path, data).await()
+                delivered = true
+                Timber.tag(TAG).d(
+                    "Sent message path=%s nodeId=%s nodeName=%s",
+                    path,
+                    node.id,
+                    node.displayName
+                )
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(
+                    e,
+                    "Failed to send message path=%s nodeId=%s nodeName=%s",
+                    path,
+                    node.id,
+                    node.displayName
+                )
+            }
+        }
+        if (!delivered) {
+            stateRepository.setPhoneConnected(false)
+        }
+        return delivered
+    }
+
+    /**
+     * Resolve the set of reachable phone nodes. Preference order:
+     *   1. The capability-based snapshot maintained by [WearConnectivityRepository].
+     *      This is the only path that works reliably on Wear OS 6.
+     *   2. A fresh capability lookup (the listener may not have fired yet on cold
+     *      start, especially right after watch app launch).
+     *   3. Legacy fallback to [NodeClient.getConnectedNodes] for older platforms or
+     *      paired devices that don't advertise the capability for some reason.
+     */
+    private suspend fun resolvePhoneNodes(): List<com.google.android.gms.wearable.Node> {
+        connectivityRepository.reachablePhoneNodes.value.takeIf { it.isNotEmpty() }
+            ?.let { return it }
+        connectivityRepository.refreshCapabilityNow()
+        connectivityRepository.reachablePhoneNodes.value.takeIf { it.isNotEmpty() }
+            ?.let { return it }
+        return try {
+            nodeClient.connectedNodes.await()
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Legacy connectedNodes lookup failed")
+            emptyList()
         }
     }
 }

@@ -54,6 +54,18 @@ class WearStatePublisher @Inject constructor(
     private var cachedWearArtAsset: Asset? = null
 
     /**
+     * Snapshot of the last (songId, playerInfo) pair handed to [publishState], kept so
+     * the watch can ask for a fresh republish via REQUEST_STATE_REFRESH. The Wear Data
+     * Layer cache is not reliably re-delivered to freshly-started listeners on
+     * Wear OS 6, so we keep our own copy and re-push it on demand.
+     */
+    @Volatile
+    private var lastSongId: String? = null
+
+    @Volatile
+    private var lastPlayerInfo: PlayerInfo? = null
+
+    /**
      * Clear the cached artwork assets.
      */
     fun clearCache() {
@@ -78,6 +90,8 @@ class WearStatePublisher @Inject constructor(
      * @param playerInfo The full player info from MusicService
      */
     fun publishState(songId: String?, playerInfo: PlayerInfo) {
+        lastSongId = songId
+        lastPlayerInfo = playerInfo
         scope.launch {
             try {
                 publishStateInternal(songId, playerInfo)
@@ -88,10 +102,33 @@ class WearStatePublisher @Inject constructor(
     }
 
     /**
+     * Republish the last known state, if any. Triggered when the watch sends a
+     * REQUEST_STATE_REFRESH command — typically right after the watch app opens or
+     * after the phone has just become reachable again. Returns true if a republish
+     * was scheduled, false if there is nothing cached to publish yet (the
+     * MusicService has never produced state in this process).
+     */
+    fun republishLastState(): Boolean {
+        val songId = lastSongId
+        val info = lastPlayerInfo ?: return false
+        scope.launch {
+            try {
+                publishStateInternal(songId, info)
+                Timber.tag(TAG).d("Republished cached Wear state on watch request")
+            } catch (e: Exception) {
+                Timber.tag(TAG).w(e, "Failed to republish state to Wear Data Layer")
+            }
+        }
+        return true
+    }
+
+    /**
      * Clear state from the Data Layer (e.g. when service is destroyed).
      */
     fun clearState() {
         clearCache()
+        lastSongId = null
+        lastPlayerInfo = null
         scope.launch {
             try {
                 val request = PutDataMapRequest.create(WearDataPaths.PLAYER_STATE).apply {

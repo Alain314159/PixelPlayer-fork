@@ -248,12 +248,33 @@ class WearPlayerViewModel @Inject constructor(
     private fun bootstrapPhoneStateSync() {
         viewModelScope.launch {
             if (isWatchOutputSelected.value) return@launch
+            // Tell the phone to republish its current state immediately. On Wear OS 6
+            // the cached DataItem is not always re-delivered to a freshly-started
+            // listener, so without this the watch shows an empty player even though
+            // the phone is happily playing.
+            playbackController.requestStateRefresh()
             repeat(PHONE_SYNC_BOOTSTRAP_ATTEMPTS) {
                 playbackController.requestPhoneVolumeState()
                 if (hasRemotePhoneState()) {
                     return@launch
                 }
                 delay(PHONE_SYNC_BOOTSTRAP_RETRY_DELAY_MS)
+            }
+            // Last-ditch attempt: if we still have no state but the phone is reachable,
+            // ask one more time. Some watches need a moment after the listener service
+            // binds before the message round-trip succeeds.
+            if (isPhoneConnected.value && !hasRemotePhoneState()) {
+                playbackController.requestStateRefresh()
+            }
+        }
+        // If the phone becomes reachable while the user has the watch app open (e.g.,
+        // Bluetooth blip recovered), pull a fresh snapshot. `StateFlow` already
+        // deduplicates by value so no `distinctUntilChanged` is needed.
+        viewModelScope.launch {
+            isPhoneConnected.collect { connected ->
+                if (connected && !isWatchOutputSelected.value) {
+                    playbackController.requestStateRefresh()
+                }
             }
         }
     }

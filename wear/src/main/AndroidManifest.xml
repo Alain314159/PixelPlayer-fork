@@ -112,6 +112,10 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/volume_state" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/favorites_sync_state" />
             </intent-filter>
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
@@ -123,6 +127,19 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/transfer_artwork" />
+            </intent-filter>
+            <!--
+              Wake the listener whenever the phone-side PixelPlay app advertises (or
+              stops advertising) its capability. This is what makes the watch's
+              "phone reachable" indicator update in real time on Wear OS 6, where
+              NodeClient.getConnectedNodes is no longer authoritative.
+            -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/pixelplay_phone_app" />
             </intent-filter>
         </service>
 

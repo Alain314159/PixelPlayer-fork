@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.SystemClock
+import com.google.android.gms.wearable.CapabilityInfo
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -13,6 +14,7 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.theveloper.pixelplay.presentation.WearMainActivity
 import com.theveloper.pixelplay.shared.WearBrowseResponse
+import com.theveloper.pixelplay.shared.WearCapabilities
 import com.theveloper.pixelplay.shared.WearDataPaths
 import com.theveloper.pixelplay.shared.WearFavoriteSyncResponse
 import com.theveloper.pixelplay.shared.WearPlaybackResult
@@ -56,6 +58,12 @@ class WearDataListenerService : WearableListenerService() {
 
     @Inject
     lateinit var favoriteSyncRepository: WearFavoriteSyncRepository
+
+    @Inject
+    lateinit var connectivityRepository: WearConnectivityRepository
+
+    @Inject
+    lateinit var playbackController: WearPlaybackController
 
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -338,6 +346,27 @@ class WearDataListenerService : WearableListenerService() {
             else -> {
                 Timber.tag(TAG).d("Ignoring message on path: ${messageEvent.path}")
             }
+        }
+    }
+
+    /**
+     * Reacts to phone-capability changes so the watch UI shows reachability in real time
+     * and so we proactively re-pull the latest state when the phone comes back. This is
+     * the recommended Wear OS 6 path, since `NodeClient.getConnectedNodes()` is no longer
+     * a reliable signal.
+     */
+    override fun onCapabilityChanged(capabilityInfo: CapabilityInfo) {
+        if (capabilityInfo.name != WearCapabilities.PIXELPLAY_PHONE_APP) {
+            return
+        }
+        val nodes = capabilityInfo.nodes
+        Timber.tag(TAG).d("onCapabilityChanged: %d reachable phone node(s)", nodes.size)
+        // Fan the change out through the central repository so any UI subscriber sees it.
+        scope.launch { connectivityRepository.refreshCapabilityNow() }
+        // Phone just came (back) online — ask it to republish the latest state so the
+        // watch UI isn't stuck on stale data from a previous session.
+        if (nodes.isNotEmpty()) {
+            playbackController.requestStateRefresh()
         }
     }
 
