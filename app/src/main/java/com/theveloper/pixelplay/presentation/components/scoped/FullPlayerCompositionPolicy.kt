@@ -64,6 +64,16 @@ internal fun rememberFullPlayerCompositionPolicy(
             keepFullPlayerComposed || expansionFraction.value > 0.12f
         }.first { it }
         if (!keepFullPlayerComposed) keepFullPlayerComposed = true
+    // Wait for the first expansion past the threshold and then exit. The old
+    // version used .collect { } which kept this coroutine receiving every frame
+    // of the expansion animation for the life of the song, long after the flag
+    // had already flipped.
+    LaunchedEffect(currentSongId) {
+        if (currentSongId == null) return@LaunchedEffect
+        if (keepFullPlayerComposed) return@LaunchedEffect
+        snapshotFlow { expansionFraction.value }
+            .first { it > 0.12f }
+        keepFullPlayerComposed = true
     }
 
     // Read expansion fraction inside derivedStateOf so that changes only trigger

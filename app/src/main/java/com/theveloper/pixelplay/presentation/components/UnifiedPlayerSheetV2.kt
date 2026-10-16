@@ -697,6 +697,21 @@ fun UnifiedPlayerSheetV2(
                             // structurally stable avoids the costly relayout/redraw
                             // restructure when the elevation crosses 0.dp during
                             // expand/collapse or right after play/pause.
+                            .miniPlayerDismissHorizontalGesture(
+                                enabled = currentSheetContentState == PlayerSheetState.COLLAPSED,
+                                handler = miniDismissGestureHandler
+                            )
+                            .graphicsLayer {
+                                translationX = offsetAnimatable.value
+                                scaleX = miniAppearScale
+                                scaleY = visualOvershootScaleY.value * miniAppearScale
+                                alpha = miniReadyAlpha
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                            }
+                            // Always keep Modifier.shadow attached. It is a no-op at 0.dp
+                            // and avoids restructuring the modifier subtree (and re-attaching
+                            // the layout node) every time elevation crosses the visibility
+                            // threshold during an expand/collapse animation.
                             .shadow(
                                 elevation = visualCardShadowElevation,
                                 shape = sheetInteractionState.playerShadowShape,

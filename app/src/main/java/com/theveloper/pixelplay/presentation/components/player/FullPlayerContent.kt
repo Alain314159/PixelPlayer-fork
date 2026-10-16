@@ -1048,6 +1048,7 @@ private fun FullPlayerAlbumCoverSection(
     val albumArtScale by animateFloatAsState(
         targetValue = if (shouldApplyPausedScale) 0.95f else 1f,
         animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        animationSpec = PauseRestFloatSpec,
         label = "AlbumArtScale"
     )
 

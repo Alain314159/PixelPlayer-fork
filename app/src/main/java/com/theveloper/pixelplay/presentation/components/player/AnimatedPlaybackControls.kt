@@ -179,6 +179,7 @@ fun AnimatedPlaybackControls(
             val playCorner by animateDpAsState(
                 targetValue = if (!playPauseVisualState) playPauseCornerPlaying else playPauseCornerPaused,
                 animationSpec = defaultSpatialDpSpec,
+                animationSpec = PauseRestDpSpec,
                 label = "playCorner"
             )
             Box(

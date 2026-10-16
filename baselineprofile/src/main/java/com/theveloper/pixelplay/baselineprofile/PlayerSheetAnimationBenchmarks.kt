@@ -89,9 +89,59 @@ class PlayerSheetAnimationBenchmarks {
                 waitForSheetState(SHEET_COLLAPSED_PATTERN, "setup after opening Home")
                 device.waitForIdle(IDLE_WAIT_MS)
             }
+            setupBlock = { setupPlayerSheetBenchmark(packageName) }
         ) {
             runPlayerSheetAnimationSequence()
         }
+    }
+
+    // Reproduces the specific lag fixed by the "Fix UnifiedPlayerSheetV2
+    // expand/collapse lag after play→pause" PR: toggle play then pause from the
+    // mini-player and immediately expand/collapse the sheet. Pre-fix this hit
+    // slow Spring.StiffnessLow rest animations and re-keyed shape providers,
+    // causing dropped frames during the gesture.
+    @Test
+    fun playerSheetExpandAfterPauseGestures() {
+        val packageName = benchmarkTargetPackageName()
+
+        benchmarkRule.measureRepeated(
+            packageName = packageName,
+            metrics = listOf(FrameTimingMetric()),
+            compilationMode = CompilationMode.Partial(
+                baselineProfileMode = BaselineProfileMode.UseIfAvailable
+            ),
+            iterations = 6,
+            startupMode = StartupMode.WARM,
+            setupBlock = { setupPlayerSheetBenchmark(packageName) }
+        ) {
+            runPlayPauseExpandSequence()
+        }
+    }
+
+    private fun androidx.benchmark.macro.MacrobenchmarkScope.setupPlayerSheetBenchmark(packageName: String) {
+        val shouldRebuildLibrary = !libraryRebuiltForThisRun
+        setupBenchmarkPermissions(packageName)
+        pressHome()
+        killProcess()
+        startActivityAndWait { intent ->
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.putExtra(BENCHMARK_EXTRA, true)
+            intent.putExtra(BENCHMARK_REBUILD_DATABASE_EXTRA, shouldRebuildLibrary)
+        }
+        waitForTargetPackageVisible(packageName)
+        waitForAppForeground("Player sheet benchmark setup", packageName)
+        device.waitForIdle(IDLE_WAIT_MS)
+        assertDeviceMediaStoreHasAudio()
+        dismissBenchmarkBlockingDialogs()
+        if (shouldRebuildLibrary) {
+            Thread.sleep(BENCHMARK_REBUILD_WAIT_MS)
+            dismissBenchmarkBlockingDialogs()
+        }
+        ensureSongIsReady()
+        libraryRebuiltForThisRun = true
+        openHomeTab()
+        waitForSheetState(SHEET_COLLAPSED_PATTERN, "setup after opening Home")
+        device.waitForIdle(IDLE_WAIT_MS)
     }
 
     private fun androidx.benchmark.macro.MacrobenchmarkScope.assertDeviceMediaStoreHasAudio() {
@@ -240,6 +290,37 @@ class PlayerSheetAnimationBenchmarks {
             collapseExpandedPlayer()
             waitForSheetState(SHEET_COLLAPSED_PATTERN, "repeated tap close $it")
         }
+    }
+
+    private fun androidx.benchmark.macro.MacrobenchmarkScope.runPlayPauseExpandSequence() {
+        val midX = device.displayWidth / 2
+        val collapsedY = (device.displayHeight * 0.86f).toInt()
+        val fullTopY = (device.displayHeight * 0.12f).toInt()
+        val fullBottomY = (device.displayHeight * 0.88f).toInt()
+
+        repeat(3) { iteration ->
+            tapMiniPlayerPlayPause("play, iter $iteration")
+            // Give the play→pause-style rest animations time to actually start
+            // running so we capture frames produced while they're in flight,
+            // which is when the pre-fix code dropped them.
+            Thread.sleep(PLAY_PAUSE_SETTLE_MS)
+            tapMiniPlayerPlayPause("pause, iter $iteration")
+
+            swipeOpenFromCollapsed(midX, collapsedY, fullTopY, steps = 12)
+            waitForSheetState(SHEET_EXPANDED_PATTERN, "post-pause expand $iteration")
+            swipe(midX, fullTopY, midX, fullBottomY, steps = 8)
+            waitForSheetState(SHEET_COLLAPSED_PATTERN, "post-pause collapse $iteration")
+        }
+    }
+
+    private fun androidx.benchmark.macro.MacrobenchmarkScope.tapMiniPlayerPlayPause(context: String) {
+        val button = findByTextOrDescription(MINI_PLAYER_PLAY_PAUSE_PATTERN, SHORT_WAIT_MS)
+            ?: throw IllegalStateException(
+                "Mini-player play/pause button not found for $context. " +
+                    "Visible UI: ${visibleUiSnapshot()}"
+            )
+        click(button)
+        Thread.sleep(DEFAULT_WAIT_MS)
     }
 
     private fun androidx.benchmark.macro.MacrobenchmarkScope.openCollapsedPlayerByTap(fallbackY: Int) {
@@ -467,6 +548,7 @@ class PlayerSheetAnimationBenchmarks {
         private const val BENCHMARK_REBUILD_WAIT_MS = 20_000L
         private const val ANIMATION_WAIT_MS = 360L
         private const val SHEET_STATE_WAIT_MS = 3_000L
+        private const val PLAY_PAUSE_SETTLE_MS = 900L
 
         private var libraryRebuiltForThisRun = false
         private const val BENCHMARK_REBUILD_DATABASE_EXTRA = "benchmark_rebuild_database"
@@ -482,6 +564,9 @@ class PlayerSheetAnimationBenchmarks {
         private val BACK_PATTERN = exactPattern("Back|Atr[aá]s")
         private val LIBRARY_TAB_PATTERN = pattern("Library|Biblioteca")
         private val COLLAPSE_PLAYER_PATTERN = exactPattern("Collapse player|Contraer reproductor")
+        // Matches the hardcoded contentDescription on the mini-player's
+        // play/pause button (see UnifiedPlayerSheetShared.kt).
+        private val MINI_PLAYER_PLAY_PAUSE_PATTERN = exactPattern("Pausar|Reproducir|Pause|Play")
         private val DISMISS_DIALOG_PATTERN = exactPattern("Got it|Entendido|Aceptar|OK")
         private val EMPTY_LIBRARY_PATTERN = pattern(
             "No songs|No valid songs|Sin canciones|No se encontraron canciones|Empty"

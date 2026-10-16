@@ -152,6 +152,10 @@ internal fun rememberSheetVisualState(
     // shape provider lambda stable across play/pause toggles — so the
     // PlayerSheetDynamicShape instance (and the modifier chain that consumes it)
     // is not recreated on every isPlaying flip.
+    // isPlaying and hasCurrentSong are read inside the lambda but kept out of the
+    // remember key set so play/pause toggles don't invalidate this provider's
+    // identity (which would cascade into a new playerShadowShape and re-outline
+    // the sheet's background/shadow modifiers).
     val isPlayingState = rememberUpdatedState(isPlaying)
     val hasCurrentSongState = rememberUpdatedState(hasCurrentSong)
     val playerContentActualBottomRadiusProvider: () -> Dp = remember(
@@ -174,6 +178,31 @@ internal fun rememberSheetVisualState(
             } else {
                 navBarCornerRadiusDp
             }
+                val calculatedNormally =
+                    if (predictiveBackCollapseProgress > 0f &&
+                        showPlayerContentArea &&
+                        currentSheetContentState == PlayerSheetState.EXPANDED
+                    ) {
+                        val expandedRadius = 0.dp
+                        val collapsedRadiusTarget = if (isNavBarHidden) 60.dp else 12.dp
+                        lerp(expandedRadius, collapsedRadiusTarget, predictiveBackCollapseProgress)
+                    } else {
+                        if (showPlayerContentArea) {
+                            val fraction = playerContentExpansionFraction.value
+                            val collapsedRadius = if (isNavBarHidden) 60.dp else 12.dp
+                            if (fraction < 0.2f) {
+                                lerp(collapsedRadius, 26.dp, (fraction / 0.2f).coerceIn(0f, 1f))
+                            } else {
+                                lerp(26.dp, 0.dp, ((fraction - 0.2f) / 0.8f).coerceIn(0f, 1f))
+                            }
+                        } else {
+                            if (!isPlayingState.value || !hasCurrentSongState.value) {
+                                if (isNavBarHidden) 32.dp else navBarCornerRadiusDp
+                            } else {
+                                if (isNavBarHidden) 32.dp else 12.dp
+                            }
+                        }
+                    }
 
             val effectiveFraction = playerContentExpansionFraction.value * (1f - predictiveBackCollapseProgress)
             val safeFraction = effectiveFraction.coerceIn(0f, 1f)
