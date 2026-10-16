@@ -319,53 +319,49 @@ fun LyricsSheet(
 
     val context = LocalContext.current
 
-    // Read lyrics alignment preference internally from DataStore
-    val lyricsAlignmentFlow = remember(context) {
-        context.dataStore.data.map { it[stringPreferencesKey("lyrics_alignment")] ?: "left" }
-    }
-    val lyricsAlignment by lyricsAlignmentFlow.collectAsStateWithLifecycle(initialValue = "left")
+    // BUG FIX (LyricsSheet 7× DataStore subscription): previously each preference had its own
+    // `context.dataStore.data.map { ... }` block, which created 7 separate subscriptions to the
+    // entire DataStore flow. Every preference write anywhere in the app would trigger 7 emissions,
+    // 7 map transforms, 7 StateFlow updates, and 7 recomposition checks even though only one
+    // preference actually changed. Combined into a single .map { ... } that returns a data class,
+    // so we have exactly ONE subscription to DataStore.
+    data class LyricsPrefs(
+        val lyricsAlignment: String = "left",
+        val showLyricsTranslation: Boolean = true,
+        val showLyricsRomanization: Boolean = true,
+        val useAnimatedLyrics: Boolean = false,
+        val animatedLyricsBlurEnabled: Boolean = true,
+        val disableBlurAllOver: Boolean = false,
+        val animatedLyricsBlurStrength: Float = 2.5f,
+        val keepScreenOn: Boolean = false,
+    )
 
-    // Read lyrics translation preference internally from DataStore
-    val showLyricsTranslationFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("show_lyrics_translation")] ?: true }
-    }
-    val showLyricsTranslation by showLyricsTranslationFlow.collectAsStateWithLifecycle(initialValue = true)
+    val lyricsPrefs by remember(context) {
+        context.dataStore.data.map { prefs ->
+            LyricsPrefs(
+                lyricsAlignment = prefs[stringPreferencesKey("lyrics_alignment")] ?: "left",
+                showLyricsTranslation = prefs[booleanPreferencesKey("show_lyrics_translation")] ?: true,
+                showLyricsRomanization = prefs[booleanPreferencesKey("show_lyrics_romanization")] ?: true,
+                useAnimatedLyrics = prefs[booleanPreferencesKey("use_animated_lyrics")] ?: false,
+                animatedLyricsBlurEnabled = prefs[booleanPreferencesKey("animated_lyrics_blur_enabled")] ?: true,
+                disableBlurAllOver = prefs[booleanPreferencesKey("disable_blur_all_over")] ?: false,
+                animatedLyricsBlurStrength = prefs[androidx.datastore.preferences.core.floatPreferencesKey("animated_lyrics_blur_strength")] ?: 2.5f,
+                keepScreenOn = prefs[booleanPreferencesKey("keep_screen_on_lyrics")] ?: false,
+            )
+        }
+    }.collectAsStateWithLifecycle(initialValue = LyricsPrefs())
 
-    // Read lyrics romanization preference internally from DataStore
-    val showLyricsRomanizationFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("show_lyrics_romanization")] ?: true }
-    }
-    val showLyricsRomanization by showLyricsRomanizationFlow.collectAsStateWithLifecycle(initialValue = true)
-
-    // Read animated lyrics preference internally from DataStore
-    val useAnimatedLyricsFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("use_animated_lyrics")] ?: false }
-    }
-    val useAnimatedLyrics by useAnimatedLyricsFlow.collectAsStateWithLifecycle(initialValue = false)
-
-    val animatedLyricsBlurEnabledFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("animated_lyrics_blur_enabled")] ?: true }
-    }
-    val animatedLyricsBlurEnabled by animatedLyricsBlurEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-
-    val disableBlurAllOverFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("disable_blur_all_over")] ?: false }
-    }
-    val disableBlurAllOver by disableBlurAllOverFlow.collectAsStateWithLifecycle(initialValue = false)
-
-    val animatedLyricsBlurStrengthFlow = remember(context) {
-        context.dataStore.data.map { it[androidx.datastore.preferences.core.floatPreferencesKey("animated_lyrics_blur_strength")] ?: 2.5f }
-    }
-    val animatedLyricsBlurStrength by animatedLyricsBlurStrengthFlow.collectAsStateWithLifecycle(initialValue = 2.5f)
-
-    // Read keep-screen-on preference from DataStore
-    val keepScreenOnFlow = remember(context) {
-        context.dataStore.data.map { it[booleanPreferencesKey("keep_screen_on_lyrics")] ?: false }
-    }
+    val lyricsAlignment = lyricsPrefs.lyricsAlignment
+    val showLyricsTranslation = lyricsPrefs.showLyricsTranslation
+    val showLyricsRomanization = lyricsPrefs.showLyricsRomanization
+    val useAnimatedLyrics = lyricsPrefs.useAnimatedLyrics
+    val animatedLyricsBlurEnabled = lyricsPrefs.animatedLyricsBlurEnabled
+    val disableBlurAllOver = lyricsPrefs.disableBlurAllOver
+    val animatedLyricsBlurStrength = lyricsPrefs.animatedLyricsBlurStrength
     var keepScreenOn by remember { mutableStateOf(false) }
     // Sync DataStore → local state
-    LaunchedEffect(Unit) {
-        keepScreenOnFlow.collect { keepScreenOn = it }
+    LaunchedEffect(lyricsPrefs.keepScreenOn) {
+        keepScreenOn = lyricsPrefs.keepScreenOn
     }
     val coroutineScope = rememberCoroutineScope()
 
