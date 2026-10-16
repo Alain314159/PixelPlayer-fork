@@ -406,13 +406,10 @@ constructor(
                                         )
                                     }
                             totalScannedCount += idBatch.size
-                            Log.d(
-                                    TAG,
-                                    "LRC Scan: Processed batch of ${idBatch.size}, total assigned so far: $batchScannedCount"
-                            )
+                            Timber.tag(TAG).d("LRC Scan: Processed batch of ${idBatch.size}, total assigned so far: $batchScannedCount")
                         }
 
-                        Log.i(TAG, "LRC Scan finished for $totalToScan songs.")
+                        Timber.tag(TAG).i("LRC Scan finished for $totalToScan songs.")
                     }
 
                     // Clean orphaned album art cache files
@@ -448,7 +445,7 @@ constructor(
                     if (hasTelegramChannels) {
                         syncTelegramData()
                     } else {
-                        Log.d(TAG, "Skipping Telegram sync — no channels configured.")
+                        Timber.tag(TAG).d("Skipping Telegram sync — no channels configured.")
                     }
 
                     // syncNeteaseData already has an internal isEmpty guard; a lightweight
@@ -456,13 +453,13 @@ constructor(
                     if (neteaseCount > 0) {
                         syncNeteaseData()
                     } else {
-                        Log.d(TAG, "Skipping Netease sync — no songs in local cache.")
+                        Timber.tag(TAG).d("Skipping Netease sync — no songs in local cache.")
                     }
 
                     if (navidromeRepository.isLoggedIn) {
                         syncNavidromeData()
                     } else {
-                        Log.d(TAG, "Skipping Navidrome sync — not logged in.")
+                        Timber.tag(TAG).d("Skipping Navidrome sync — not logged in.")
                     }
 
                     // Recalculate total
@@ -481,10 +478,10 @@ constructor(
                     }
                     Result.success(workDataOf(OUTPUT_TOTAL_SONGS to finalTotalSongs.toLong()))
                 } catch (e: CancellationException) {
-                    Log.w(TAG, "Sync cancelled — returning retry so WorkManager re-runs", e)
+                    Timber.tag(TAG).w("Sync cancelled — returning retry so WorkManager re-runs", e)
                     throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error during MediaStore synchronization", e)
+                    Timber.tag(TAG).e("Error during MediaStore synchronization", e)
                     AdvancedPerformanceDiagnostics.recordEventIfEnabled(
                         type = AdvancedPerformanceDiagnostics.EventTypes.WORKER,
                         name = "sync_worker_failure"
@@ -714,7 +711,7 @@ constructor(
         val now = System.currentTimeMillis()
         val cacheAge = now - genreMapCacheTimestamp
         if (!forceRefresh && genreMapCache.isNotEmpty() && cacheAge < GENRE_CACHE_TTL_MS) {
-            Log.d(TAG, "Using cached genre map (${genreMapCache.size} entries, age: ${cacheAge/1000}s)")
+            Timber.tag(TAG).d("Using cached genre map (${genreMapCache.size} entries, age: ${cacheAge/1000}s)")
             return@coroutineScope genreMapCache
         }
         
@@ -791,14 +788,14 @@ constructor(
             }.awaitAll()
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching genre map", e)
+            Timber.tag(TAG).e("Error fetching genre map", e)
         }
         
         // Update cache
         if (genreMap.isNotEmpty()) {
             genreMapCache = genreMap.toMap()
             genreMapCacheTimestamp = System.currentTimeMillis()
-            Log.d(TAG, "Genre map cache updated with ${genreMap.size} entries")
+            Timber.tag(TAG).d("Genre map cache updated with ${genreMap.size} entries")
         }
         
         genreMap
@@ -979,7 +976,7 @@ constructor(
                 }
 
         if (rawDataList.isEmpty()) {
-            Log.i(TAG, "MediaStore cursor produced 0 raw songs after directory filtering")
+            Timber.tag(TAG).i("MediaStore cursor produced 0 raw songs after directory filtering")
             Trace.endSection()
             return emptyList()
         }
@@ -1014,10 +1011,7 @@ constructor(
         rawDataList.clear()
 
         val totalCount = songsToProcess.size
-        Log.i(
-            TAG,
-            "MediaStore raw=$rawSongCount, songsToProcess=$totalCount, isRebuild=$isRebuild"
-        )
+        Timber.tag(TAG).i("MediaStore raw=$rawSongCount, songsToProcess=$totalCount, isRebuild=$isRebuild")
         if (totalCount == 0) {
             Trace.endSection()
             return emptyList()
@@ -1190,7 +1184,7 @@ constructor(
 
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to read metadata via TagLib for ${raw.filePath}", e)
+                    Timber.tag(TAG).w("Failed to read metadata via TagLib for ${raw.filePath}", e)
                 }
             }
         }
@@ -1335,7 +1329,7 @@ constructor(
         fun invalidateGenreCache() {
             genreMapCache = emptyMap()
             genreMapCacheTimestamp = 0L
-            Log.d(TAG, "Genre cache invalidated")
+            Timber.tag(TAG).d("Genre cache invalidated")
         }
 
         /**
@@ -1477,7 +1471,7 @@ constructor(
     // chunk is allocated.  The full song ID set is collected across all chunks
     // so deletion of removed songs still works correctly at the end.
     private suspend fun syncTelegramData() {
-        Log.i(TAG, "Syncing Telegram songs to main database (Unified Mode)...")
+        Timber.tag(TAG).i("Syncing Telegram songs to main database (Unified Mode)...")
         try {
             val telegramSongs = telegramDao.getAllTelegramSongs().first()
             val channels = telegramDao.getAllChannels().first().associateBy { it.chatId }
@@ -1487,7 +1481,7 @@ constructor(
                 if (existingUnifiedTelegramIds.isNotEmpty()) {
                     musicDao.clearAllTelegramSongs()
                 }
-                Log.d(TAG, "No Telegram songs to sync.")
+                Timber.tag(TAG).d("No Telegram songs to sync.")
                 return
             }
 
@@ -1770,7 +1764,7 @@ constructor(
                     deletedSongIds = emptyList() // Deletions handled after all chunks
                 )
                 totalSynced += songsToInsert.size
-                Log.d(TAG, "Telegram sync: flushed chunk of ${songsToInsert.size} songs ($totalSynced / ${telegramSongs.size} total)")
+                Timber.tag(TAG).d("Telegram sync: flushed chunk of ${songsToInsert.size} songs ($totalSynced / ${telegramSongs.size} total)")
                 // chunk-local collections go out of scope here and are GC-eligible
             }
 
@@ -1786,17 +1780,17 @@ constructor(
                         deletedSongIds = batch
                     )
                 }
-                Log.i(TAG, "Telegram sync: removed ${deletedUnifiedSongIds.size} deleted songs.")
+                Timber.tag(TAG).i("Telegram sync: removed ${deletedUnifiedSongIds.size} deleted songs.")
             }
 
-            Log.i(TAG, "Synced $totalSynced Telegram songs with Unified Metadata.")
+            Timber.tag(TAG).i("Synced $totalSynced Telegram songs with Unified Metadata.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to sync Telegram data", e)
+            Timber.tag(TAG).e("Failed to sync Telegram data", e)
         }
     }
 
     private suspend fun syncNeteaseData() {
-        Log.i(TAG, "Syncing Netease songs to main database (Unified Mode)...")
+        Timber.tag(TAG).i("Syncing Netease songs to main database (Unified Mode)...")
         try {
             val neteaseSongs = neteaseDao.getAllNeteaseSongsList()
             val existingUnifiedNeteaseIds = musicDao.getAllNeteaseSongIds()
@@ -1805,7 +1799,7 @@ constructor(
                 if (existingUnifiedNeteaseIds.isNotEmpty()) {
                     musicDao.clearAllNeteaseSongs()
                 }
-                Log.d(TAG, "No Netease songs to sync.")
+                Timber.tag(TAG).d("No Netease songs to sync.")
                 return
             }
 
@@ -1911,9 +1905,9 @@ constructor(
                 crossRefs = crossRefsToInsert,
                 deletedSongIds = deletedUnifiedSongIds
             )
-            Log.i(TAG, "Synced ${songsToInsert.size} Netease songs with Unified Metadata.")
+            Timber.tag(TAG).i("Synced ${songsToInsert.size} Netease songs with Unified Metadata.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to sync Netease data", e)
+            Timber.tag(TAG).e("Failed to sync Netease data", e)
         }
     }
 
@@ -1958,28 +1952,28 @@ constructor(
 
         // Only auto-sync Navidrome during main library sync if it's been more than SYNC_THRESHOLD_MS (24h)
         if (currentTime - lastSync < NavidromeRepository.SYNC_THRESHOLD_MS) {
-            Log.d(TAG, "Skipping Navidrome sync during main library sync - last sync was recent.")
+            Timber.tag(TAG).d("Skipping Navidrome sync during main library sync - last sync was recent.")
             // Still sync unified library from local cache to be safe
             navidromeRepository.syncUnifiedLibrarySongsFromNavidrome()
             return
         }
 
-        Log.i(TAG, "Syncing Navidrome data from server...")
+        Timber.tag(TAG).i("Syncing Navidrome data from server...")
         try {
             // Fetch playlists and songs from the Navidrome server, then sync to unified library
             val result = navidromeRepository.syncAllPlaylistsAndSongs()
             result.fold(
                 onSuccess = { summary ->
-                    Log.i(TAG, "Navidrome sync complete: ${summary.playlistCount} playlists, ${summary.syncedSongCount} songs synced (${summary.failedPlaylistCount} failed)")
+                    Timber.tag(TAG).i("Navidrome sync complete: ${summary.playlistCount} playlists, ${summary.syncedSongCount} songs synced (${summary.failedPlaylistCount} failed)")
                 },
                 onFailure = { e ->
-                    Log.w(TAG, "Navidrome server sync failed, falling back to local cache sync", e)
+                    Timber.tag(TAG).w("Navidrome server sync failed, falling back to local cache sync", e)
                     // Fallback: at least sync what we already have cached
                     navidromeRepository.syncUnifiedLibrarySongsFromNavidrome()
                 }
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to sync Navidrome data", e)
+            Timber.tag(TAG).e("Failed to sync Navidrome data", e)
         }
     }
 }

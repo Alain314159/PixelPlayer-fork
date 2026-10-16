@@ -154,7 +154,7 @@ class MetadataEditStateHolder @Inject constructor(
         coverArtUpdate: CoverArtUpdate?
     ): MetadataEditResult = withContext(Dispatchers.IO) {
         
-        Log.d("MetadataEditStateHolder", "Starting saveMetadata for: ${song.title}")
+        Timber.tag("MetadataEditStateHolder").d("Starting saveMetadata for: ${song.title}")
 
         // CRITICAL FIX: Preserve existing embedded artwork if the user didn't provide a new one.
         // Editing text metadata might strip the artwork if the underlying tagging library
@@ -166,13 +166,13 @@ class MetadataEditStateHolder @Inject constructor(
                 null
             }
             if (existingMetadata?.artwork != null) {
-                Log.d("MetadataEditStateHolder", "Preserving existing embedded artwork")
+                Timber.tag("MetadataEditStateHolder").d("Preserving existing embedded artwork")
                 CoverArtUpdate(existingMetadata.artwork.bytes, existingMetadata.artwork.mimeType ?: "image/jpeg")
             } else {
                 null
             }
         } else if (coverArtUpdate.isDeletion) {
-            Log.d("MetadataEditStateHolder", "Artwork deletion requested, skipping preservation")
+            Timber.tag("MetadataEditStateHolder").d("Artwork deletion requested, skipping preservation")
             coverArtUpdate
         } else {
             coverArtUpdate
@@ -186,7 +186,7 @@ class MetadataEditStateHolder @Inject constructor(
         val resolvedSongId = resolveSongIdForMetadataEdit(song)
 
         if (resolvedSongId == null) {
-            Log.w("MetadataEditStateHolder", "Cannot edit metadata for non-numeric song id: ${song.id}")
+            Timber.tag("MetadataEditStateHolder").w("Cannot edit metadata for non-numeric song id: ${song.id}")
             return@withContext MetadataEditResult(
                 success = false,
                 error = MetadataEditError.INVALID_INPUT,
@@ -210,7 +210,7 @@ class MetadataEditStateHolder @Inject constructor(
             songId = resolvedSongId,
         )
 
-        Log.d("MetadataEditStateHolder", "Editor result: success=${result.success}, error=${result.error}")
+        Timber.tag("MetadataEditStateHolder").d("Editor result: success=${result.success}, error=${result.error}")
 
         if (result.success) {
             val refreshedAlbumArtUri = if (coverArtUpdate?.isDeletion == true) {
@@ -271,7 +271,7 @@ class MetadataEditStateHolder @Inject constructor(
                 parsedLyrics = parsedLyrics
             )
         } else {
-            Log.w("MetadataEditStateHolder", "Metadata edit failed: ${result.error} - ${result.errorMessage}")
+            Timber.tag("MetadataEditStateHolder").w("Metadata edit failed: ${result.error} - ${result.errorMessage}")
             MetadataEditResult(
                 success = false,
                 error = result.error,
@@ -348,7 +348,7 @@ class MetadataEditStateHolder @Inject constructor(
         cb: MetadataEditCallbacks,
     ) {
         cb.scope.launch {
-            Log.e("PlayerViewModel", "METADATA_EDIT_VM: Starting editSongMetadata via Holder")
+            Timber.tag("PlayerViewModel").e("METADATA_EDIT_VM: Starting editSongMetadata via Holder")
 
             // On Android 11+, request MediaStore write permission for local songs
             val songId = song.id.toLongOrNull()
@@ -628,7 +628,7 @@ class MetadataEditStateHolder @Inject constructor(
             coverArtUpdate = coverArtUpdate
         )
 
-        Log.e("PlayerViewModel", "METADATA_EDIT_VM: Result success=${result.success}")
+        Timber.tag("PlayerViewModel").e("METADATA_EDIT_VM: Result success=${result.success}")
 
         if (result.success && result.updatedSong != null) {
             val updatedSong = result.updatedSong
@@ -692,7 +692,7 @@ class MetadataEditStateHolder @Inject constructor(
             cb.sendToast(context.getString(R.string.metadata_edit_updated_successfully))
         } else {
             val errorMessage = result.getUserFriendlyErrorMessage()
-            Log.e("PlayerViewModel", "METADATA_EDIT_VM: Failed - ${result.error}: $errorMessage")
+            Timber.tag("PlayerViewModel").e("METADATA_EDIT_VM: Failed - ${result.error}: $errorMessage")
             cb.sendToast(errorMessage)
         }
     }
@@ -825,7 +825,7 @@ class MetadataEditStateHolder @Inject constructor(
     }
 
     private suspend fun performBatchEditGenre(songs: List<Song>, newGenre: String, cb: MetadataEditCallbacks) {
-        Log.d("PlayerViewModel", "Starting batch genre update for ${songs.size} songs to '$newGenre'")
+        Timber.tag("PlayerViewModel").d("Starting batch genre update for ${songs.size} songs to '$newGenre'")
         cb.sendToast(context.getString(R.string.metadata_edit_updating_n_songs, songs.size))
 
         var successCount = 0

@@ -363,10 +363,7 @@ class CastTransferStateHolder @Inject constructor(
                     if (pendingItemId != null && pendingItemId != currentItemId) {
                         pendingForceJumpAttempts += 1
                         lastPendingForceJumpAt = now
-                        Log.w(
-                            "PX_CAST_STATE",
-                            "pending_force_jump pending=$pendingId current=$currentSongId itemId=$pendingItemId ageMs=$pendingAgeMs attempt=$pendingForceJumpAttempts"
-                        )
+                        Timber.tag("PX_CAST_STATE").w("pending_force_jump pending=$pendingId current=$currentSongId itemId=$pendingItemId ageMs=$pendingAgeMs attempt=$pendingForceJumpAttempts")
                         castStateHolder.castPlayer?.jumpToItem(pendingItemId, 0L)
                     }
                 }
@@ -383,10 +380,7 @@ class CastTransferStateHolder @Inject constructor(
                 pendingAgeMs,
                 pendingMismatchStatusRequestCount
             )
-            Log.w(
-                "PX_CAST_STATE",
-                "pending_mismatch pending=$pendingId current=$currentSongId ageMs=$pendingAgeMs attempts=$pendingMismatchStatusRequestCount"
-            )
+            Timber.tag("PX_CAST_STATE").w("pending_mismatch pending=$pendingId current=$currentSongId ageMs=$pendingAgeMs attempts=$pendingMismatchStatusRequestCount")
             pendingRemoteSongId = null
             pendingRemoteSongMarkedAt = 0L
             pendingMismatchStatusRequestCount = 0
@@ -409,14 +403,8 @@ class CastTransferStateHolder @Inject constructor(
                 val prematureFinish = mediaStatus.idleReason == MediaStatus.IDLE_REASON_FINISHED &&
                     durationMs > 0L &&
                     streamPosition in 0 until (durationMs - 3000L)
-                Log.w(
-                    "PX_CAST_STATE",
-                    "idle songId=$idleSongId itemId=$currentItemId reason=${mediaStatus.idleReason} streamPos=$streamPosition duration=$durationMs pending=$pendingRemoteSongId prematureFinish=$prematureFinish"
-                )
-                Log.w(
-                    "PX_CAST_STATE",
-                    "idle media title=${currentRemoteItem?.media?.metadata?.getString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE)} contentType=${currentRemoteItem?.media?.contentType} contentId=${currentRemoteItem?.media?.contentId}"
-                )
+                Timber.tag("PX_CAST_STATE").w("idle songId=$idleSongId itemId=$currentItemId reason=${mediaStatus.idleReason} streamPos=$streamPosition duration=$durationMs pending=$pendingRemoteSongId prematureFinish=$prematureFinish")
+                Timber.tag("PX_CAST_STATE").w("idle media title=${currentRemoteItem?.media?.metadata?.getString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE)} contentType=${currentRemoteItem?.media?.contentType} contentId=${currentRemoteItem?.media?.contentId}")
             }
         }
 
@@ -438,20 +426,14 @@ class CastTransferStateHolder @Inject constructor(
                     pendingRemoteSongId,
                     mediaStatus.queueItems.size
                 )
-                Log.e(
-                    "PX_CAST_ITEM_ERROR",
-                    "songId=$errorSongId itemId=$currentItemId idleReason=${mediaStatus.idleReason} streamPos=$streamPosition duration=${remoteMediaClient.streamDuration} queueSize=${mediaStatus.queueItems.size}"
-                )
+                Timber.tag("PX_CAST_ITEM_ERROR").e("songId=$errorSongId itemId=$currentItemId idleReason=${mediaStatus.idleReason} streamPos=$streamPosition duration=${remoteMediaClient.streamDuration} queueSize=${mediaStatus.queueItems.size}")
                 Timber.tag(CAST_LOG_TAG).e(
                     "Remote item media info. title=%s contentType=%s contentId=%s",
                     currentRemoteItem?.media?.metadata?.getString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE),
                     currentRemoteItem?.media?.contentType,
                     currentRemoteItem?.media?.contentId
                 )
-                Log.e(
-                    "PX_CAST_ITEM_ERROR",
-                    "media title=${currentRemoteItem?.media?.metadata?.getString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE)} contentType=${currentRemoteItem?.media?.contentType} contentId=${currentRemoteItem?.media?.contentId}"
-                )
+                Timber.tag("PX_CAST_ITEM_ERROR").e("media title=${currentRemoteItem?.media?.metadata?.getString(com.google.android.gms.cast.MediaMetadata.KEY_TITLE)} contentType=${currentRemoteItem?.media?.contentType} contentId=${currentRemoteItem?.media?.contentId}")
             }
 
             scheduleCastErrorRecoveryIfNeeded(castSession, errorSongId)
@@ -794,7 +776,7 @@ class CastTransferStateHolder @Inject constructor(
                 reason,
                 songId
             )
-            Log.w("PX_CAST_RECOVERY", "ending_session reason=$reason songId=$songId")
+            Timber.tag("PX_CAST_RECOVERY").w("ending_session reason=$reason songId=$songId")
             emitCastError(message)
             if (castStateHolder.castSession.value === session) {
                 sessionManager?.endCurrentSession(true)
@@ -834,10 +816,7 @@ class CastTransferStateHolder @Inject constructor(
         val stalledMs = now - remoteBufferingLastProgressAtMs
         if (now - lastRemoteBufferingLogAtMs >= remoteBufferingLogIntervalMs) {
             lastRemoteBufferingLogAtMs = now
-            Log.w(
-                "PX_CAST_BUFFERING",
-                "stalledMs=$stalledMs totalMs=$totalBufferingMs attempts=$remoteBufferingRecoveryAttempts songId=$currentSongId itemId=${mediaStatus.currentItemId} pos=$streamPosition duration=${remoteMediaClient.streamDuration}"
-            )
+            Timber.tag("PX_CAST_BUFFERING").w("stalledMs=$stalledMs totalMs=$totalBufferingMs attempts=$remoteBufferingRecoveryAttempts songId=$currentSongId itemId=${mediaStatus.currentItemId} pos=$streamPosition duration=${remoteMediaClient.streamDuration}")
         }
 
         if (remoteBufferingRecoveryJob?.isActive == true) return
@@ -846,7 +825,7 @@ class CastTransferStateHolder @Inject constructor(
             remoteBufferingRecoveryAttempts == 0 && stalledMs >= remoteBufferingSoftRecoveryMs -> {
                 remoteBufferingRecoveryAttempts = 1
                 remoteBufferingRecoveryJob = scope?.launch {
-                    Log.w("PX_CAST_BUFFERING", "soft_recovery songId=$currentSongId pos=$streamPosition")
+                    Timber.tag("PX_CAST_BUFFERING").w("soft_recovery songId=$currentSongId pos=$streamPosition")
                     remoteMediaClient.requestStatus()
                     castStateHolder.castPlayer?.play()
                     delay(750L)
@@ -941,10 +920,7 @@ class CastTransferStateHolder @Inject constructor(
             castDeviceIpHint = castDeviceIpHint
         )
 
-        Log.w(
-            "PX_CAST_BUFFERING",
-            "reload_current songId=${startSong.id} startIndex=$startIndex pos=$resumePosition queueSize=${remoteQueue.size}"
-        )
+        Timber.tag("PX_CAST_BUFFERING").w("reload_current songId=${startSong.id} startIndex=$startIndex pos=$resumePosition queueSize=${remoteQueue.size}")
         resetRemoteBufferingWatchdog(clearReloadAttempts = false)
         castPlayer.loadQueue(
             songs = remoteQueue,
@@ -1546,15 +1522,12 @@ class CastTransferStateHolder @Inject constructor(
                 ?.optString("songId")
                 ?.takeIf { it.isNotBlank() }
             if (currentSongId == targetSongId) {
-                Log.i("PX_CAST_QLOAD", "align ok targetSongId=$targetSongId attempt=$attempt")
+                Timber.tag("PX_CAST_QLOAD").i("align ok targetSongId=$targetSongId attempt=$attempt")
                 return
             }
 
             if (attempt > 0 && currentSongId != null && currentSongId == lastObservedSongId) {
-                Log.w(
-                    "PX_CAST_QLOAD",
-                    "align stuck targetSongId=$targetSongId currentSongId=$currentSongId attempt=$attempt"
-                )
+                Timber.tag("PX_CAST_QLOAD").w("align stuck targetSongId=$targetSongId currentSongId=$currentSongId attempt=$attempt")
                 return
             }
 
@@ -1563,16 +1536,10 @@ class CastTransferStateHolder @Inject constructor(
                 ?.itemId
 
             if (targetItemId != null && targetItemId != status.currentItemId) {
-                Log.w(
-                    "PX_CAST_QLOAD",
-                    "align jump targetSongId=$targetSongId currentSongId=$currentSongId itemId=$targetItemId attempt=$attempt"
-                )
+                Timber.tag("PX_CAST_QLOAD").w("align jump targetSongId=$targetSongId currentSongId=$currentSongId itemId=$targetItemId attempt=$attempt")
                 castStateHolder.castPlayer?.jumpToItem(targetItemId, 0L)
             } else {
-                Log.w(
-                    "PX_CAST_QLOAD",
-                    "align miss targetSongId=$targetSongId currentSongId=$currentSongId queueSize=${status.queueItems.size} attempt=$attempt"
-                )
+                Timber.tag("PX_CAST_QLOAD").w("align miss targetSongId=$targetSongId currentSongId=$currentSongId queueSize=${status.queueItems.size} attempt=$attempt")
             }
             lastObservedSongId = currentSongId
         }
