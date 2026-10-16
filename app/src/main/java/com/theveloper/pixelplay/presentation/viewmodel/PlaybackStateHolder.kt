@@ -60,7 +60,7 @@ class PlaybackStateHolder @Inject constructor(
         //    second-level precision. Drops position-polling-driven CPU wakes 4x → 1x per second.
         //  - BACKGROUND_TICK_MS (1000): screen off, no slider visible.
         private const val SLIDER_TICK_MS = 250L
-        private const val MINIPLAYER_TICK_MS = 1000L
+        private const val MINIPLAYER_TICK_MS = 500L  // BUG FIX (#2734): was 1000ms, too slow for mini player progress bar
         private const val BACKGROUND_TICK_MS = 1000L
         /**
          * Threshold above which we skip per-item moveMediaItem calls and use

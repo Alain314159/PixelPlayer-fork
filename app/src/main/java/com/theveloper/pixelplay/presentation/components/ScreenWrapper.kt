@@ -15,13 +15,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
@@ -69,7 +77,7 @@ fun ScreenWrapper(
     // stack (navigate / pop commit) emits currentBackStackEntry, so reading these here is what
     // triggers recomposition; the synchronous navController properties below are then re-read
     // with frame-perfect values.
-    val visibleEntriesState by navController.visibleEntries.collectAsState()
+    val visibleEntriesState by navController.visibleEntries.collectAsStateWithLifecycle()
     val currentBackStackEntryState by navController.currentBackStackEntryAsState()
 
     // BUG FIX: previously this was a second `collectAsState()` on `navController.visibleEntries`,
@@ -104,7 +112,7 @@ fun ScreenWrapper(
     val previousEntryId = navController.previousBackStackEntry?.id.also { _ -> currentBackStackEntryState }
     val shouldDim = myEntry != null && previousEntryId == myEntry.id
 
-    val disableBlurAllOver by playerViewModel.disableBlurAllOver.collectAsState()
+    val disableBlurAllOver by playerViewModel.disableBlurAllOver.collectAsStateWithLifecycle()
 
     val transition = animatedVisibilityScope?.transition
 
