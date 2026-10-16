@@ -1244,9 +1244,21 @@ fun SyncedLyricsList(
         positionOverrideMs ?: (playbackPosition + lyricsSyncOffset).coerceAtLeast(0L)
     }
     val isPreviewSeeking = positionOverrideMs != null
-    val currentLineIndex by remember(position, lines) {
+
+    // BUG FIX (#2892): previously `remember(position, lines) { derivedStateOf { ... } }`
+    // created a NEW derivedStateOf object every 250ms (every position tick), which:
+    // 1. Allocated a new State instance each tick (GC pressure)
+    // 2. Caused the entire lyrics list to re-evaluate which line is current
+    // 3. The re-evaluation ran on the main thread, competing with audio callbacks
+    //    → caused audio stuttering when lyrics were visible
+    //
+    // Fix: use rememberUpdatedState so the derivedStateOf is created ONCE and
+    // reads the latest position/lines via stable State references.
+    val positionState = androidx.compose.runtime.rememberUpdatedState(position)
+    val linesState = androidx.compose.runtime.rememberUpdatedState(lines)
+    val currentLineIndex by remember(lines) {
         derivedStateOf {
-            resolveCurrentLineIndex(lines = lines, position = position)
+            resolveCurrentLineIndex(lines = linesState.value, position = positionState.value)
         }
     }
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
