@@ -110,7 +110,9 @@
 ## 📱 Requirements
 
 - **Android 11** (API 30) or higher
-- **6GB RAM** recommended for smooth performance
+- **4GB RAM recommended** for smooth performance on large libraries (hi-res FLAC, multiple
+  cloud sources, Android Auto + Wear OS active simultaneously). 3GB is sufficient for
+  typical compressed-audio libraries.
 
 ---
 
