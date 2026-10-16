@@ -854,6 +854,11 @@ private data class Arrangement(
                         // fijar tamaños (small acotado, medium entre small y large, large <= target)
                         val large = min(targetLargeSize, availableSpace)
                         val small = targetSmallSize.coerceIn(minSmallSize, maxSmallSize)
+                        // Clamp both bounds so the range is always valid, even when
+                        // available space is smaller than the default dp minimums.
+                        val effectiveMaxSmall = minOf(maxSmallSize, large)
+                        val effectiveMinSmall = minOf(minSmallSize, effectiveMaxSmall)
+                        val small = targetSmallSize.coerceIn(effectiveMinSmall, effectiveMaxSmall)
                         val medium = if (targetMediumSize > 0f) {
                             targetMediumSize.coerceIn(small, large)
                         } else (large + small) / 2f
@@ -900,20 +905,24 @@ private fun multiBrowseKeylineList(
     smallCounts: IntArray = intArrayOf(1),
     alignment: CarouselAlignment = CarouselAlignment.Start
 ): KeylineList {
-    if (carouselMainAxisSize == 0f || preferredItemSize == 0f) return emptyKeylineList()
+    if (carouselMainAxisSize <= 0f || preferredItemSize <= 0f) return emptyKeylineList()
 
     var resolvedSmallCounts = smallCounts
     val targetLargeSize = min(preferredItemSize, carouselMainAxisSize)
     val targetSmallSize = (targetLargeSize / 3f).coerceIn(minSmallItemSize, maxSmallItemSize)
+    // Clamp small-item size bounds to never exceed available space
+    val clampedMinSmall = minOf(minSmallItemSize, targetLargeSize)
+    val clampedMaxSmall = minOf(maxSmallItemSize, targetLargeSize)
+    val targetSmallSize = (targetLargeSize / 3f).coerceIn(minOf(clampedMinSmall, clampedMaxSmall), maxOf(clampedMinSmall, clampedMaxSmall))
     val targetMediumSize = (targetLargeSize + targetSmallSize) / 2f
 
-    if (carouselMainAxisSize < minSmallItemSize * 2) resolvedSmallCounts = intArrayOf(0)
+    if (carouselMainAxisSize < clampedMinSmall * 2) resolvedSmallCounts = intArrayOf(0)
 
     val resolvedLargeCounts = largeCounts ?: run {
         val minAvailableLargeSpace =
-            carouselMainAxisSize - targetMediumSize * mediumCounts.max() - maxSmallItemSize * resolvedSmallCounts.max()
+            carouselMainAxisSize - targetMediumSize * mediumCounts.max() - clampedMaxSmall * resolvedSmallCounts.max()
         val minLargeCount = max(1, floor(minAvailableLargeSpace / targetLargeSize).toInt())
-        val maxLargeCount = ceil(carouselMainAxisSize / targetLargeSize).toInt()
+        val maxLargeCount = max(minLargeCount, ceil(carouselMainAxisSize / targetLargeSize).toInt())
         IntArray(maxLargeCount - minLargeCount + 1) { maxLargeCount - it }
     }
     val anchorSize = with(density) { 10.dp.toPx() }
@@ -923,8 +932,8 @@ private fun multiBrowseKeylineList(
             availableSpace = carouselMainAxisSize,
             itemSpacing = itemSpacing,
             targetSmallSize = targetSmallSize,
-            minSmallSize = minSmallItemSize,
-            maxSmallSize = maxSmallItemSize,
+            minSmallSize = clampedMinSmall,
+            maxSmallSize = clampedMaxSmall,
             smallCounts = resolvedSmallCounts,
             targetMediumSize = targetMediumSize,
             mediumCounts = mediumCounts,
@@ -945,8 +954,8 @@ private fun multiBrowseKeylineList(
                 availableSpace = carouselMainAxisSize,
                 itemSpacing = itemSpacing,
                 targetSmallSize = targetSmallSize,
-                minSmallSize = minSmallItemSize,
-                maxSmallSize = maxSmallItemSize,
+                minSmallSize = clampedMinSmall,
+                maxSmallSize = clampedMaxSmall,
                 smallCounts = intArrayOf(sc),
                 targetMediumSize = targetMediumSize,
                 mediumCounts = intArrayOf(mc),
@@ -1408,8 +1417,8 @@ private class KeylineListScopeImpl : KeylineListScope {
 
     override fun add(size: Float, isAnchor: Boolean) {
         tmpKeylines.add(TmpKeyline(size, isAnchor))
-        // guardamos el primer índice del mayor tamaño (primer focal)
-        if (size > focalItemSize) {
+        // Anchors should never become focal items, even during tiny measurement passes.
+        if (!isAnchor && (firstFocalIndex == -1 || size > focalItemSize)) {
             focalItemSize = size
             firstFocalIndex = tmpKeylines.lastIndex
         }
@@ -1452,11 +1461,14 @@ private class KeylineListScopeImpl : KeylineListScope {
         pivotIndex: Int,
         pivotOffset: Float,
     ): KeylineList {
+        if (tmpKeylines.isEmpty()) return emptyKeylineList()
+
         val lastFocalIndex = findLastFocalIndex()
+        val resolvedPivotIndex = pivotIndex.coerceIn(0, tmpKeylines.lastIndex)
         val list = mutableListOf<Keyline>()
 
         // Pivote
-        val pivot = tmpKeylines[pivotIndex]
+        val pivot = tmpKeylines[resolvedPivotIndex]
         val pivotCutoff =
             when {
                 isCutoffLeft(pivot.size, pivotOffset) ->
@@ -1469,7 +1481,7 @@ private class KeylineListScopeImpl : KeylineListScope {
             size = pivot.size,
             offset = pivotOffset,
             unadjustedOffset = pivotOffset,
-            isFocal = pivotIndex in firstFocalIndex..lastFocalIndex,
+            isFocal = resolvedPivotIndex in firstFocalIndex..lastFocalIndex,
             isAnchor = pivot.isAnchor,
             isPivot = true,
             cutoff = pivotCutoff
@@ -1478,7 +1490,7 @@ private class KeylineListScopeImpl : KeylineListScope {
         // Antes del pivote (de izq→der en la lista resultante; insertamos al principio)
         var offset = pivotOffset - (focalItemSize / 2f) - itemSpacing
         var unadj  = pivotOffset - (focalItemSize / 2f) - itemSpacing
-        for (original in (pivotIndex - 1) downTo 0) {
+        for (original in (resolvedPivotIndex - 1) downTo 0) {
             val tmp = tmpKeylines[original]
             val center = offset - (tmp.size / 2f)
             val unadjCenter = unadj - (focalItemSize / 2f)
@@ -1504,7 +1516,7 @@ private class KeylineListScopeImpl : KeylineListScope {
         // Después del pivote
         offset = pivotOffset + (focalItemSize / 2f) + itemSpacing
         unadj  = pivotOffset + (focalItemSize / 2f) + itemSpacing
-        for (original in (pivotIndex + 1)..tmpKeylines.lastIndex) {
+        for (original in (resolvedPivotIndex + 1)..tmpKeylines.lastIndex) {
             val tmp = tmpKeylines[original]
             val center = offset + (tmp.size / 2f)
             val unadjCenter = unadj + (focalItemSize / 2f)
