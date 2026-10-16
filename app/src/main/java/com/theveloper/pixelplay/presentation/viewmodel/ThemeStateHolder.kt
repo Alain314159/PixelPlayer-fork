@@ -134,7 +134,17 @@ class ThemeStateHolder @Inject constructor(
         }
     }
 
-    // LRU Cache for individual album schemes
+    // LRU Cache for individual album schemes.
+    //
+    // IMPORTANT: This map is accessed from both the main thread (via
+    // getAlbumColorSchemeFlow / ensureAlbumColorScheme, which Compose recomposition
+    // triggers) and Dispatchers.IO (via requestAlbumColorSchemeGeneration's
+    // finally block, which writes .value on the cached flows and via
+    // forceRegenerateColorScheme). The previous implementation had no
+    // synchronization, which could throw ConcurrentModificationException when
+    // the LRU evicted an entry while another thread was iterating / writing.
+    //
+    // We synchronize all accesses on the map's own monitor.
     private val individualAlbumColorSchemes = object : LinkedHashMap<String, MutableStateFlow<ColorSchemePair?>>(
         32, 0.75f, true
     ) {
@@ -142,6 +152,7 @@ class ThemeStateHolder @Inject constructor(
             return size > 96
         }
     }
+    private val albumColorSchemesLock = Any()
 
     private val emptyAlbumColorScheme = MutableStateFlow<ColorSchemePair?>(null).asStateFlow()
     private val pendingAlbumColorSchemeLock = Any()
@@ -199,7 +210,9 @@ class ThemeStateHolder @Inject constructor(
     ): StateFlow<ColorSchemePair?> {
         if (uriString.isBlank()) return emptyAlbumColorScheme
 
-        val existingFlow = individualAlbumColorSchemes[uriString]
+        val existingFlow = synchronized(albumColorSchemesLock) {
+            individualAlbumColorSchemes[uriString]
+        }
         if (existingFlow != null) {
             if (eager && existingFlow.value == null) {
                 requestAlbumColorSchemeGeneration(uriString, existingFlow)
@@ -208,7 +221,17 @@ class ThemeStateHolder @Inject constructor(
         }
 
         val newFlow = MutableStateFlow<ColorSchemePair?>(null)
-        individualAlbumColorSchemes[uriString] = newFlow
+        synchronized(albumColorSchemesLock) {
+            // Re-check: another thread may have inserted between our read and write.
+            val raceFlow = individualAlbumColorSchemes[uriString]
+            if (raceFlow != null) {
+                if (eager && raceFlow.value == null) {
+                    requestAlbumColorSchemeGeneration(uriString, raceFlow)
+                }
+                return raceFlow.asStateFlow()
+            }
+            individualAlbumColorSchemes[uriString] = newFlow
+        }
 
         if (eager) {
             requestAlbumColorSchemeGeneration(uriString, newFlow)
@@ -220,8 +243,12 @@ class ThemeStateHolder @Inject constructor(
     fun ensureAlbumColorScheme(uriString: String) {
         if (uriString.isBlank()) return
 
-        val targetFlow = individualAlbumColorSchemes[uriString]
-            ?: MutableStateFlow<ColorSchemePair?>(null).also { individualAlbumColorSchemes[uriString] = it }
+        val targetFlow = synchronized(albumColorSchemesLock) {
+            individualAlbumColorSchemes[uriString]
+                ?: MutableStateFlow<ColorSchemePair?>(null).also {
+                    individualAlbumColorSchemes[uriString] = it
+                }
+        }
 
         if (targetFlow.value != null) return
         requestAlbumColorSchemeGeneration(uriString, targetFlow)
@@ -274,7 +301,9 @@ class ThemeStateHolder @Inject constructor(
          }
 
          // Iterate if there is an active flow for this URI and update it
-         val activeFlow = individualAlbumColorSchemes[uriString]
+         val activeFlow = synchronized(albumColorSchemesLock) {
+             individualAlbumColorSchemes[uriString]
+         }
          if (activeFlow != null) {
              activeFlow.value = newScheme
          }

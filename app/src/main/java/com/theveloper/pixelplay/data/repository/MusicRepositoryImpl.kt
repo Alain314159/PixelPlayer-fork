@@ -591,14 +591,18 @@ class MusicRepositoryImpl @Inject constructor(
 
     override fun searchAlbums(query: String, minTracks: Int): Flow<List<Album>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return musicDao.searchAlbums(query, emptyList(), false, minTracks).map { entities ->
+        // Escape LIKE metacharacters in user input (searches for "100%" were matching everything containing "100")
+        val escapedQuery = com.theveloper.pixelplay.data.database.SqlLikeEscaper.escapeForLike(query)
+        return musicDao.searchAlbums(escapedQuery, emptyList(), false, minTracks).map { entities ->
             entities.map { it.toAlbum() }
         }.flowOn(Dispatchers.IO)
     }
 
     override fun searchArtists(query: String): Flow<List<Artist>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return musicDao.searchArtists(query, emptyList(), false).map { entities ->
+        // Escape LIKE metacharacters in user input
+        val escapedQuery = com.theveloper.pixelplay.data.database.SqlLikeEscaper.escapeForLike(query)
+        return musicDao.searchArtists(escapedQuery, emptyList(), false).map { entities ->
             entities.map { it.toArtist() }
         }.flowOn(Dispatchers.IO)
     }

@@ -87,7 +87,6 @@ class ColorSchemeProcessor @Inject constructor(
                     paletteStyle = paletteStyle,
                     colorAccuracyLevel = resolvedAccuracyLevel
                 )?.let { schemePair ->
-                    Trace.endSection()
                     return schemePair
                 }
             }
@@ -100,6 +99,10 @@ class ColorSchemeProcessor @Inject constructor(
                 forceRefresh = forceRefresh
             )
         } finally {
+            // Note: Trace.endSection() must be called exactly once per Trace.beginSection().
+            // The early-return path above used to call endSection() before returning, which
+            // corrupted the trace stack and could trigger ANR checks on some OEM ROMs.
+            // Now we only call it here in finally.
             Trace.endSection()
         }
     }

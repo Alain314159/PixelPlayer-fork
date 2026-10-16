@@ -487,8 +487,9 @@ interface MusicDao {
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
+        AND (title LIKE '%' || :query || '%' ESCAPE '\' OR artist_name LIKE '%' || :query || '%' ESCAPE '\')
         ORDER BY title ASC
+        LIMIT 200
     """)
     fun searchSongsLike(
         query: String,
@@ -501,13 +502,17 @@ interface MusicDao {
         allowedParentDirs: List<String>,
         applyDirectoryFilter: Boolean
     ): Flow<List<SongEntity>> {
+        // Escape LIKE metacharacters (% and _) in user input so they are matched
+        // literally. Without this, searching for "100%" matches every row
+        // containing "100" followed by anything.
+        val escapedQuery = SqlLikeEscaper.escapeForLike(query.trim())
         val ftsFlow = searchSongsMatch(
             matchQuery = buildSongSearchMatchQuery(query),
             allowedParentDirs = allowedParentDirs,
             applyDirectoryFilter = applyDirectoryFilter
         )
         val likeFlow = searchSongsLike(
-            query = query.trim(),
+            query = escapedQuery,
             allowedParentDirs = allowedParentDirs,
             applyDirectoryFilter = applyDirectoryFilter
         )
@@ -993,11 +998,12 @@ interface MusicDao {
 
     /**
      * LIKE-based search focusing only on titles.
+     * Note: ESCAPE '\' is required so callers must escape :query with SqlLikeEscaper.
      */
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND title LIKE '%' || :query || '%'
+        AND title LIKE '%' || :query || '%' ESCAPE '\'
         ORDER BY title ASC
         LIMIT :limit
     """)
@@ -1010,11 +1016,12 @@ interface MusicDao {
 
     /**
      * LIKE-based fallback search for songs that FTS tokenization may miss.
+     * Note: ESCAPE '\' is required so callers must escape :query with SqlLikeEscaper.
      */
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
-        AND (title LIKE '%' || :query || '%' OR artist_name LIKE '%' || :query || '%')
+        AND (title LIKE '%' || :query || '%' ESCAPE '\' OR artist_name LIKE '%' || :query || '%' ESCAPE '\')
         ORDER BY title ASC
         LIMIT :limit
     """)
@@ -1276,7 +1283,7 @@ interface MusicDao {
             albums.date_added AS date_added,
             albums.year AS year
         FROM albums
-        WHERE albums.title LIKE '%' || :query || '%'
+        WHERE albums.title LIKE '%' || :query || '%' ESCAPE '\'
         AND song_count >= :minTracks
         ORDER BY albums.title ASC
     """)
@@ -1359,7 +1366,7 @@ interface MusicDao {
         FROM songs
         INNER JOIN albums ON albums.id = songs.album_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND (albums.title LIKE '%' || :query || '%' OR albums.artist_name LIKE '%' || :query || '%')
+        AND (albums.title LIKE '%' || :query || '%' ESCAPE '\' OR albums.artist_name LIKE '%' || :query || '%' ESCAPE '\')
         GROUP BY
             albums.id,
             albums.title,
@@ -1471,7 +1478,7 @@ interface MusicDao {
     @Query("SELECT * FROM artists WHERE id = :artistId")
     fun getArtistById(artistId: Long): Flow<ArtistEntity?>
 
-    @Query("SELECT * FROM artists WHERE name LIKE '%' || :query || '%' ORDER BY name ASC")
+    @Query("SELECT * FROM artists WHERE name LIKE '%' || :query || '%' ESCAPE '\\' ORDER BY name ASC")
     fun searchArtists(query: String): Flow<List<ArtistEntity>>
 
     @Query("SELECT COUNT(*) FROM artists")
@@ -1502,7 +1509,7 @@ interface MusicDao {
         INNER JOIN song_artist_cross_ref ON song_artist_cross_ref.song_id = songs.id
         INNER JOIN artists ON artists.id = song_artist_cross_ref.artist_id
         WHERE (:applyDirectoryFilter = 0 OR songs.id < 0 OR songs.parent_directory_path IN (:allowedParentDirs))
-        AND artists.name LIKE '%' || :query || '%'
+        AND artists.name LIKE '%' || :query || '%' ESCAPE '\\'
         GROUP BY artists.id
         ORDER BY artists.name ASC
     """)
