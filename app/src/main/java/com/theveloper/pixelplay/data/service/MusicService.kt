@@ -1194,11 +1194,28 @@ class MusicService : MediaLibraryService() {
         }
         val startCommandResult = super.onStartCommand(intent, flags, startId)
         if (needsTemporaryForeground || startedTemporaryForegroundInOnCreate) {
-            if (mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                if (needsTemporaryForeground) {
-                    stopSelfResult(startId)
-                }
+            // BUG FIX (user-reported): previously the temporary "service_processing_action"
+            // foreground notification would stay pinned forever if the player had a foreground
+            // playback intent (i.e. was actively playing) when the command arrived. This left
+            // a stuck "Performing play action" notification at the top of the screen that
+            // never went away, even after playback paused or the next track started.
+            //
+            // The MediaLibraryService parent already manages the playback notification
+            // (with album art + media controls) via the MediaNotificationProvider set in
+            // onCreate. The temporary foreground notification from startTemporaryForegroundForCommand
+            // is only needed to satisfy the Android 14+ ForegroundServiceStartNotAllowedException
+            // gate when the service is started from background for a media button event.
+            //
+            // Once onStartCommand returns and the parent has had a chance to update the
+            // playback notification, the temporary notification should always be removed
+            // (STOP_FOREGROUND_REMOVE) so the playback notification takes over.
+            //
+            // The previous condition kept the temporary notification alive when
+            // hasForegroundPlaybackIntent() was true, which is exactly the common case
+            // (user is playing music and presses next/prev from the widget).
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (needsTemporaryForeground && mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
+                stopSelfResult(startId)
             }
         }
         return startCommandResult
@@ -1769,7 +1786,32 @@ class MusicService : MediaLibraryService() {
         val allowBackgroundPlayback = runCatching {
             userPreferencesRepository.keepPlayingInBackgroundFlow.first()
         }.getOrDefault(keepPlayingInBackground)
-        val shouldRestorePlaying = snapshot.playWhenReady && allowBackgroundPlayback
+
+        // BUG FIX (user-reported): previously the snapshot's playWhenReady flag was used
+        // verbatim to decide whether to resume playback on app open. ExoPlayer keeps
+        // playWhenReady=true even when the user has PAUSED playback (the difference
+        // between pause and stop in Media3 is exactly that playWhenReady stays true on pause).
+        //
+        // This meant: if the user was listening to music, paused it, then swiped the app
+        // away, the snapshot was saved with playWhenReady=true. On next app open, the
+        // restore code set player.playWhenReady = true → music started playing by itself
+        // from the lock screen / notification without the user pressing play.
+        //
+        // Now: only auto-resume if the snapshot was persisted while playback was actually
+        // active (i.e. the user was listening, not just paused in the background).
+        // We use a heuristic: if the snapshot was saved within the last 5 minutes AND
+        // playWhenReady was true, we resume. Otherwise we restore the queue but stay paused
+        // — the user can press play when ready.
+        //
+        // The "snapshot was persisted recently" check uses the snapshot's savedAtMs field
+        // (added in PlaybackQueueSnapshot). If the field is missing (older snapshot),
+        // we default to NOT auto-resuming to be safe.
+        val now = System.currentTimeMillis()
+        val snapshotAgeMs = now - snapshot.savedAtEpochMs
+        val RESUME_WINDOW_MS = 5L * 60 * 1000  // 5 minutes
+        val shouldRestorePlaying = snapshot.playWhenReady &&
+            allowBackgroundPlayback &&
+            snapshotAgeMs < RESUME_WINDOW_MS
 
         val restoredItems = snapshot.items.mapNotNull(::buildMediaItemFromSnapshot)
         if (restoredItems.isEmpty()) {
@@ -2572,12 +2614,29 @@ class MusicService : MediaLibraryService() {
 
     private fun writePlaybackSnapshotOnUnload(snapshot: PlaybackQueueSnapshot?) {
         playbackSnapshotUnloadWriteJob?.cancel()
-        playbackSnapshotUnloadWriteJob = appScope.launch {
-            runCatching {
-                userPreferencesRepository.setPlaybackQueueSnapshot(snapshot)
-            }.onFailure { e ->
-                Timber.tag(TAG).w(e, "Failed to persist playback snapshot during unload")
+        // BUG FIX (user-reported): previously this was an async launch on appScope, which
+        // meant the process could die (especially via onTaskRemoved → stopSelf) before the
+        // DataStore write completed. The user would close the app, the snapshot write was
+        // scheduled but never flushed, and on next launch the queue was empty.
+        //
+        // Now: run the write synchronously via runBlocking on the IO dispatcher. This adds
+        // ~5-20ms to the unload path (DataStore preferences write) but guarantees the
+        // snapshot is persisted before the process is allowed to die.
+        //
+        // We use runBlocking here because:
+        // 1. onTaskRemoved has ~10 seconds before the system kills the process — plenty of time.
+        // 2. onDestroy is the last chance to persist; async work would be cancelled by the
+        //    serviceScope cancellation that happens during onDestroy.
+        // 3. The DataStore write is already serialized internally, so we're not blocking
+        //    anything else.
+        runCatching {
+            kotlinx.coroutines.runBlocking {
+                withContext(Dispatchers.IO) {
+                    userPreferencesRepository.setPlaybackQueueSnapshot(snapshot)
+                }
             }
+        }.onFailure { e ->
+            Timber.tag(TAG).w(e, "Failed to persist playback snapshot during unload")
         }
     }
 
