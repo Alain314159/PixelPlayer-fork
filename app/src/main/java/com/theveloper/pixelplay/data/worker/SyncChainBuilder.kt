@@ -179,6 +179,8 @@ class CloudSyncWorker @AssistedInject constructor(
 @HiltWorker
 class MaintenanceWorker @AssistedInject constructor(
     @Assisted appContext: Context,
+    private val musicDao: com.theveloper.pixelplay.data.database.MusicDao,
+    private val engagementDao: com.theveloper.pixelplay.data.database.EngagementDao,
 ) : CoroutineWorker(appContext, "MaintenanceWorker") {
 
     companion object {
@@ -205,21 +207,32 @@ class MaintenanceWorker @AssistedInject constructor(
             Timber.tag("SyncChain").i("Phase 3: Maintenance starting")
             setProgress(workDataOf("phase" to "maintenance", "status" to "running"))
 
-            // TODO: move maintenance logic here:
-            //  - deleteOrphanedEngagements() (was previously dead code — see bug A2 fix)
-            //  - deleteOrphanedAlbums() / deleteOrphanedArtists() (currently invoked inside
-            //    SyncWorker.deleteSongsAndRelatedData, but periodic standalone cleanup is better)
-            //  - cross-ref integrity check
-            //  - statistics aggregation
+            // BUG FIX (A2 follow-up): invoke deleteOrphanedEngagements() which was previously
+            // dead code (declared in EngagementDao but never called from anywhere). It removes
+            // song_engagements rows whose song_id no longer matches any songs.id. Without this,
+            // engagements accumulate forever for deleted songs.
+            val engagementsRemoved = runCatching { engagementDao.deleteOrphanedEngagements() }.getOrDefault(0)
+            Timber.tag("SyncChain").i("Removed $engagementsRemoved orphaned engagement rows")
 
+            // Also clean up orphaned albums and artists (whose songs have all been deleted).
+            // These are normally invoked inside deleteSongsAndRelatedData, but a periodic
+            // standalone cleanup catches any rows that slipped through (e.g. after a crash
+            // mid-delete).
+            runCatching { musicDao.deleteOrphanedAlbums() }
+                .onFailure { Timber.tag("SyncChain").w(it, "Failed to delete orphaned albums") }
+            runCatching { musicDao.deleteOrphanedArtists() }
+                .onFailure { Timber.tag("SyncChain").w(it, "Failed to delete orphaned artists") }
+
+            val totalOrphansRemoved = engagementsRemoved
             setProgress(
                 workDataOf(
                     "phase" to "maintenance",
-                    "status" to "completed"
+                    "status" to "completed",
+                    KEY_ORPHANS_REMOVED to totalOrphansRemoved
                 )
             )
-            Timber.tag("SyncChain").i("Phase 3: Maintenance completed (skeleton)")
-            Result.success()
+            Timber.tag("SyncChain").i("Phase 3: Maintenance completed ($totalOrphansRemoved orphans removed)")
+            Result.success(workDataOf(KEY_ORPHANS_REMOVED to totalOrphansRemoved))
         } catch (e: Exception) {
             Timber.tag("SyncChain").e(e, "Phase 3: Maintenance failed")
             Result.retry()
