@@ -361,6 +361,9 @@ dependencies {
     // UI Utilities & Extra
     implementation(libs.timber)
     implementation(libs.generativeai)
+    // Official Google Gen AI SDK — replaces the hand-rolled GeminiAiClient. Provides streaming,
+    // tool use, multimodal input. Already declared in libs.versions.toml (googleGenai = "1.78.0").
+    implementation(libs.google.genai)
     implementation(libs.smooth.corner.rect.android.compose)
     implementation(libs.reorderables)
     implementation(libs.codeview)
