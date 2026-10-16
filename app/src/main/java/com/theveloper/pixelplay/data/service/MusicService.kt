@@ -336,6 +336,14 @@ class MusicService : MediaLibraryService() {
 
     private val transitionFinishedListener: () -> Unit = {
         replayGainProcessor.onTransitionFinished()
+        // BUG FIX (#2794): re-attach EQ to the new audio session after crossfade completes.
+        // During crossfade, the EQ was intentionally NOT re-attached (see the collector
+        // above) to avoid killing EQ on the outgoing player's fade-out. Now that the
+        // transition is done, the new master player's session ID is the active one.
+        val sessionId = engine.getAudioSessionId()
+        if (sessionId != 0) {
+            equalizerManager.attachToAudioSessionIfNeeded(sessionId)
+        }
     }
 
     private fun publishMediaSessionPlayer(player: Player, logMessage: String) {
@@ -488,8 +496,18 @@ class MusicService : MediaLibraryService() {
             }
 
             // Re-attach equalizer whenever the active audio session changes (e.g. crossfade)
+            // BUG FIX (#2794): previously the EQ was re-attached immediately when the audio
+            // session ID changed during a crossfade. But during crossfade, the outgoing
+            // player (playerA) is still fading out on its old session ID, and the incoming
+            // player (playerB) has a new session ID. Re-attaching the EQ to the new session
+            // mid-crossfade meant the outgoing audio lost EQ processing for the duration of
+            // the fade, producing an audible "EQ turns off during crossfade" effect.
+            //
+            // Fix: defer the EQ re-attachment until the crossfade transition is complete.
+            // The engine fires onTransitionFinished via onPlayerSwappedListeners, which
+            // we already collect for other purposes. We add the EQ re-attachment there.
             engine.activeAudioSessionId.collect { newSessionId ->
-                if (newSessionId != 0) {
+                if (newSessionId != 0 && !engine.isTransitionRunning()) {
                     equalizerManager.attachToAudioSessionIfNeeded(newSessionId)
                 }
             }
@@ -1456,6 +1474,29 @@ class MusicService : MediaLibraryService() {
             if (nextIndex != androidx.media3.common.C.INDEX_UNSET) {
                 runCatching { replayGainProcessor.prefetch(player.getMediaItemAt(nextIndex)) }
             }
+
+            // BUG FIX (#2798): "No audio when the next track starts automatically."
+            // When a song finishes and the next track starts automatically (MEDIA_ITEM_TRANSITION_REASON_AUTO),
+            // the player should be producing audio. But on some devices/format combinations
+            // (especially when switching from one codec to another, e.g. MP3 → FLAC), the
+            // audio sink doesn't re-initialize correctly and the next track plays silently
+            // (progress bar moves but no sound).
+            //
+            // Fix: if this was an automatic transition AND playWhenReady is true AND the
+            // player is NOT actually producing audio (isPlaying == false), force a
+            // prepare() + play() to re-initialize the audio pipeline.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                player.playWhenReady &&
+                !player.isPlaying &&
+                player.playbackState != Player.STATE_BUFFERING
+            ) {
+                Timber.tag(TAG).w("Auto-transition to next track but player not producing audio — forcing prepare+play (issue #2798)")
+                if (player.playbackState == Player.STATE_IDLE) {
+                    player.prepare()
+                }
+                player.play()
+            }
+
             // Optimization: Don't force-update widgets on every rapid skip.
             // Let the debounced updater handle it to prevent UI freezes.
             widgetUpdateManager.requestFullUpdate(false)
