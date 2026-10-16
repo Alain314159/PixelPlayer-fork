@@ -49,7 +49,8 @@ class NeteaseRepository @Inject constructor(
     private val dao: NeteaseDao,
     private val musicDao: MusicDao,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     private companion object {
         private const val NETEASE_SONG_ID_OFFSET = 3_000_000_000_000L
@@ -177,7 +178,10 @@ class NeteaseRepository @Inject constructor(
     suspend fun logout() {
         api.logout()
         clearLoginState()
-        
+
+        // Notify DualPlayerEngine to evict resolvedUriCache (stale Netease proxy URLs).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.NETEASE)
+
         // Delete all Netease playlists from the database
         val neteasePlaylistsToDelete = dao.getAllPlaylistsList()
         neteasePlaylistsToDelete.forEach { playlist ->

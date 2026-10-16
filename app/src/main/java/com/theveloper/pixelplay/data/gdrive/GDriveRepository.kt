@@ -37,7 +37,8 @@ class GDriveRepository @Inject constructor(
     private val api: GDriveApiService,
     private val dao: GDriveDao,
     private val musicDao: MusicDao,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     data class BulkSyncResult(
         val folderCount: Int,
@@ -219,6 +220,8 @@ class GDriveRepository @Inject constructor(
         dao.clearAllSongs()
         dao.clearAllFolders()
         _isLoggedInFlow.value = false
+        // Notify DualPlayerEngine to evict resolvedUriCache (stale GDrive proxy URLs).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.GDRIVE)
     }
 
     // --- Folder Management ---

@@ -45,7 +45,8 @@ class JellyfinRepository @Inject constructor(
     private val dao: JellyfinDao,
     private val musicDao: MusicDao,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     private companion object {
         private const val TAG = "JellyfinRepo"
@@ -173,6 +174,9 @@ class JellyfinRepository @Inject constructor(
         Timber.d("$TAG: Logging out")
         api.clearCredentials()
         prefs.edit().clear().apply()
+
+        // Notify DualPlayerEngine to evict resolvedUriCache (stale Jellyfin proxy URLs).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.JELLYFIN)
 
         val playlistsToDelete = dao.getAllPlaylistsList()
         playlistsToDelete.forEach { playlist ->

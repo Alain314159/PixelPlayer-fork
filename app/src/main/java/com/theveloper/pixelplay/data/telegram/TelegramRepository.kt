@@ -38,7 +38,8 @@ import timber.log.Timber
 class TelegramRepository @Inject constructor(
     private val clientManager: TelegramClientManager,
     private val dao: TelegramDao,
-    private val playlistPreferencesRepository: PlaylistPreferencesRepository
+    private val playlistPreferencesRepository: PlaylistPreferencesRepository,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     private companion object {
         private const val AUTH_REQUEST_TIMEOUT_MS = 20_000L
@@ -97,6 +98,9 @@ class TelegramRepository @Inject constructor(
 
     fun logout() {
         clientManager.logout()
+        // Notify DualPlayerEngine that Telegram auth state changed so it can evict
+        // resolvedUriCache (which may contain stale localhost-proxy URLs).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.TELEGRAM)
     }
 
     private suspend fun runAuthRequest(

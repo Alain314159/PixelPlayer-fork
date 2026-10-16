@@ -222,7 +222,8 @@ class DualPlayerEngine @Inject constructor(
     private val gdriveStreamProxy: com.theveloper.pixelplay.data.gdrive.GDriveStreamProxy,
     private val telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager,
     private val connectivityStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder,
-    private val forwardingPlayerHolder: ForwardingPlayerHolder
+    private val forwardingPlayerHolder: ForwardingPlayerHolder,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     private companion object {
         private const val AUDIO_OFFLOAD_STALL_FALLBACK_MS = 4_000L
@@ -254,6 +255,7 @@ class DualPlayerEngine @Inject constructor(
     private var transitionJob: Job? = null
     private var bufferingFallbackJob: Job? = null
     private var transitionRunning = false
+    @Volatile private var cloudAuthListenerRegistered = false
     private var preResolutionJob: Job? = null
     private var queueSnapshot: List<MediaItem> = emptyList()
     private var activeWindowStartIndex = 0
@@ -804,6 +806,28 @@ class DualPlayerEngine @Inject constructor(
         if (!isReleased && ::playerA.isInitialized && playerA.applicationLooper.thread.isAlive) return
         if (scope.coroutineContext[Job]?.isActive != true) {
             scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        }
+
+        // BUG FIX (S-6 follow-up): subscribe to cloud auth state changes so that
+        // resolvedUriCache is evicted when a cloud provider is logged out, signed in,
+        // or has its proxy restarted. Without this, stale URLs pointing to a now-defunct
+        // proxy port would be served for up to 100 songs until LRU eviction.
+        if (!cloudAuthListenerRegistered) {
+            cloudAuthListenerRegistered = true
+            scope.launch {
+                cloudAuthStateBroadcaster.events.collect { event ->
+                    when (event) {
+                        is com.theveloper.pixelplay.data.cloud.CloudAuthEvent.LoggedOut,
+                        is com.theveloper.pixelplay.data.cloud.CloudAuthEvent.TokenRefreshFailed,
+                        is com.theveloper.pixelplay.data.cloud.CloudAuthEvent.ProxyRestarted -> {
+                            clearResolvedUriCache()
+                        }
+                        is com.theveloper.pixelplay.data.cloud.CloudAuthEvent.LoggedIn -> {
+                            // No action needed — next resolveCloudUri call will populate the cache.
+                        }
+                    }
+                }
+            }
         }
 
         if (::playerA.isInitialized) {

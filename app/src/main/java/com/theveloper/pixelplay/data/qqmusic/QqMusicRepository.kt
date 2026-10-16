@@ -46,7 +46,8 @@ class QqMusicRepository @Inject constructor(
     private val dao: QqMusicDao,
     private val musicDao: MusicDao,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
 
     private companion object {
@@ -253,7 +254,10 @@ class QqMusicRepository @Inject constructor(
     suspend fun logout() {
         api.logout()
         prefs.edit().clear().apply()
-        
+
+        // Notify DualPlayerEngine to evict resolvedUriCache (stale QQ Music proxy URLs).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.QQ_MUSIC)
+
         // Delete all QQ Music playlists from the database
         val playlistsToDelete = dao.getAllPlaylistsList()
         playlistsToDelete.forEach { playlist ->

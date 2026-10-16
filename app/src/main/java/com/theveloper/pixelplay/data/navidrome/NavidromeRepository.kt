@@ -59,7 +59,8 @@ class NavidromeRepository @Inject constructor(
     private val dao: NavidromeDao,
     private val musicDao: MusicDao,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cloudAuthStateBroadcaster: com.theveloper.pixelplay.data.cloud.CloudAuthStateBroadcaster
 ) {
     companion object {
         const val SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000L // 24 hours
@@ -207,6 +208,10 @@ class NavidromeRepository @Inject constructor(
         Timber.d("$TAG: Logging out")
         api.clearCredentials()
         prefs.edit { clear() }
+
+        // Notify DualPlayerEngine that auth state changed so it can evict its resolvedUriCache
+        // (which may contain stale localhost-proxy URLs pointing to a now-stopped proxy port).
+        cloudAuthStateBroadcaster.notifyLoggedOut(com.theveloper.pixelplay.data.cloud.CloudProvider.NAVIDROME)
 
         // Delete all Navidrome playlists from database
         val playlistsToDelete = dao.getAllPlaylistsList()
