@@ -126,6 +126,13 @@ android {
             ?: "b18441a1ff607e10a989891a5462e627"
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+
+        // Sentry DSN — read from env var (preferred) or local.properties.
+        // If empty, the Sentry SDK no-ops in release builds (privacy-friendly default).
+        // Set SENTRY_DSN in your env or local.properties to enable server-side crash aggregation.
+        val sentryDsn = (System.getenv("SENTRY_DSN") ?: "")
+            .ifBlank { keystoreProperties.getProperty("SENTRY_DSN") ?: "" }
+        buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
     }
 
     signingConfigs {
@@ -357,6 +364,12 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.google.play.services.cast.framework)
     implementation(libs.tdlib)
+
+    // Crash reporting — Sentry (self-hostable, privacy-friendly alternative to Crashlytics).
+    // DSN comes from BuildConfig.SENTRY_DSN; if empty, SDK no-ops.
+    // sentry-android-timber automatically routes Timber.e() calls to Sentry breadcrumbs.
+    implementation(libs.sentry.android)
+    implementation(libs.sentry.timber)
 
     // UI Utilities & Extra
     implementation(libs.timber)

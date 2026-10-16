@@ -103,9 +103,10 @@ tensorflowLiteSelectTfOps = "2.16.1"
 tensorflowLiteSupport = "0.5.0"
 wavySlider = "2.2.0"
 workRuntimeKtx = "2.12.0"
-wavySlider = "2.2.0"
-workRuntimeKtx = "2.11.2"
 timber = "5.0.1"
+# Crash reporting. Sentry 8.x is the current stable line; self-hostable, privacy-friendly.
+# DSN is read from local.properties / gradle.properties at build time (sent to BuildConfig).
+sentry = "8.5.0"
 generativeai = "0.9.0"
 mockk = "1.14.11"
 turbine = "1.2.1"
@@ -293,6 +294,12 @@ commons-lang3 = { module = "org.apache.commons:commons-lang3", version.ref = "co
 jdom2 = { module = "org.jdom:jdom2", version.ref = "jdom2" }
 jose4j = { module = "org.bitbucket.b_c:jose4j", version.ref = "jose4j" }
 apache-httpclient = { module = "org.apache.httpcomponents:httpclient", version.ref = "httpclient" }
+
+# Sentry crash reporting — self-hostable, privacy-friendly alternative to Crashlytics.
+# DSN should be set via SENTRY_DSN env var at build time (sent to BuildConfig.SENTRY_DSN).
+# If empty, Sentry SDK no-ops in release builds.
+sentry-android = { module = "io.sentry:sentry-android", version.ref = "sentry" }
+sentry-timber = { module = "io.sentry:sentry-android-timber", version.ref = "sentry" }
 
 
 [plugins]

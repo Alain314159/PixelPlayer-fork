@@ -213,3 +213,21 @@
     public static int d(...);
     public static int i(...);
 }
+
+# ─── Sentry ─────────────────────────────────────────────────────────────────
+# Sentry SDK ships its own ProGuard config inside the AAR; these rules
+# ensure the parts we touch directly (SentryAndroid, Sentry, SentryBeforeSendCallback,
+# Message protocol) survive R8 full mode.
+-keep class io.sentry.Sentry { *; }
+-keep class io.sentry.SentryAndroid { *; }
+-keep class io.sentry.SentryOptions { *; }
+-keep class io.sentry.protocol.Message { *; }
+-keep class io.sentry.hints.* { *; }
+-keep @io.sentry.annotation.* class *
+-keep class * extends io.sentry.integration.Integration
+-dontwarn io.sentry.**
+-dontwarn org.slf4j.**
+# Keep BuildConfig.SENTRY_DSN so Sentry SDK can read it at runtime.
+-keep class com.theveloper.pixelplay.BuildConfig {
+    public static java.lang.String SENTRY_DSN;
+}

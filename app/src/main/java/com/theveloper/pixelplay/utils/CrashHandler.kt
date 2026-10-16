@@ -52,9 +52,52 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
     /**
      * Installs this crash handler as the default uncaught exception handler.
      * Should be called in Application.onCreate().
+     *
+     * If a Sentry DSN is configured (BuildConfig.SENTRY_DSN non-empty), the SDK is
+     * initialized first so it captures the crash via its own mechanism; this handler
+     * still saves a local copy to SharedPreferences for the in-app crash dialog.
      */
     fun install(context: Context) {
         appContext = context.applicationContext
+
+        // Initialize Sentry SDK if a DSN was provided at build time.
+        // If SENTRY_DSN is empty, this is a no-op (the SDK is on the classpath but inactive).
+        try {
+            val dsn = com.theveloper.pixelplay.BuildConfig.SENTRY_DSN
+            if (!dsn.isNullOrBlank()) {
+                io.sentry.SentryAndroid.init(context) { options ->
+                    options.dsn = dsn
+                    // Sample rate: 1.0 = capture all crashes.
+                    // Lower this if the app becomes high-traffic.
+                    options.sampleRate = 1.0
+                    // Traces sample rate (for performance monitoring) — keep low to avoid
+                    // overhead. Set to 0 to disable.
+                    options.tracesSampleRate = 0.0
+                    // Attach screenshots — disabled by default for privacy.
+                    options.attachScreenshots = false
+                    // Attach view hierarchy on crash — useful for debugging.
+                    options.attachViewHierarchy = true
+                    // Before-send hook: redact sensitive data before sending to Sentry.
+                    // Reuses CrashLogRedactor so the same redaction rules apply as the local
+                    // SharedPreferences crash log.
+                    options.beforeSend = SentryBeforeSendCallback@ { event, _ ->
+                        val redactedMessage = event.message?.let { CrashLogRedactor.redact(it.message) }
+                        if (redactedMessage != null) {
+                            event.message = io.sentry.protocol.Message().apply { message = redactedMessage }
+                        }
+                        event
+                    }
+                }
+                // Register sentry-android-timber so all Timber.e() / Timber.w() calls
+                // automatically become Sentry breadcrumbs. (Implementation: the
+                // SentryTimberTree is auto-registered by the SDK on init.)
+                timber.log.Timber.tag("CrashHandler").i("Sentry initialized with DSN ${dsn.take(20)}...")
+            }
+        } catch (e: Exception) {
+            // Defensive: don't crash the app if Sentry init fails.
+            timber.log.Timber.tag("CrashHandler").w(e, "Sentry initialization failed (non-fatal)")
+        }
+
         defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler(this)
     }
@@ -62,6 +105,15 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
         try {
             saveCrashLog(throwable)
+            // Capture the exception via Sentry if it's enabled (DSN was provided at build time).
+            // Sentry SDK has its own UncaughtExceptionHandler integration that normally handles
+            // this, but we call captureException explicitly to ensure the event is sent even
+            // if the SDK's auto-capture is delayed by the shutdown sequence.
+            if (com.theveloper.pixelplay.BuildConfig.SENTRY_DSN.isNotBlank()) {
+                io.sentry.Sentry.captureException(throwable)
+                // Force flush — the process is about to die.
+                io.sentry.Sentry.flush(2000)
+            }
         } catch (e: Exception) {
             // Ignore any errors during crash saving
         }
