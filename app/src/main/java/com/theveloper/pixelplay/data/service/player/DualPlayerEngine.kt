@@ -1214,11 +1214,37 @@ class DualPlayerEngine @Inject constructor(
             else -> null
         }
 
+        // BUG FIX (S-5): previously, if `resolved == null` (proxy not ready yet, auth revoked,
+        // etc.), the function fell through and returned the *original* cloud:// URI — which
+        // ExoPlayer cannot open. Worse, the next call would re-attempt resolution (no caching
+        // of negative results), and the original URI would be passed to ExoPlayer repeatedly.
+        // The user saw a generic playback error with no auto-recovery.
+        //
+        // Now: if resolved is null, throw so the caller can handle the failure (e.g. ExoPlayer
+        // will report STATE_ERROR and the caller can retry after a short delay when the proxy
+        // is ready). We do NOT cache the negative result so subsequent calls do retry.
         if (resolved != null) {
             resolvedUriCache.put(uriString, resolved)
             return@withContext resolved
         }
-        uri
+        // Throw instead of returning the unresolvable URI.
+        throw java.io.IOException("Could not resolve cloud URI: $uriString — proxy not ready or auth revoked")
+    }
+
+    /**
+     * Clear the cached cloud URI resolutions.
+     *
+     * BUG FIX (S-6): previously the resolvedUriCache was never invalidated when a cloud proxy
+     * was stopped/restarted (e.g. logout of Navidrome, sign out of Telegram). Cached URLs
+     * pointing to the now-defunct proxy port (after proxy restart) would be served for up
+     * to 100 songs until evicted. The cached URL `http://127.0.0.1:OLDPORT/navidrome/...`
+     * points to a port that's now closed (or worse, reused by another service), and playback
+     * fails with Connection refused. Now: callers should invoke this whenever a cloud proxy
+     * is stopped or the auth state changes.
+     */
+    fun clearResolvedUriCache() {
+        resolvedUriCache.evictAll()
+        Timber.tag("DualPlayerEngine").d("Cleared resolvedUriCache — proxy/auth state changed")
     }
 
     private suspend fun resolveTelegramUriAsync(uri: Uri, uriString: String): Uri? = withContext(Dispatchers.IO) {
