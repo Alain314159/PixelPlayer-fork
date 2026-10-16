@@ -179,48 +179,13 @@ class AiPlaylistGenerator @Inject constructor(
 
     /**
      * Escape a string for safe interpolation inside a JSON string literal.
-     * Handles: " \ / \b \f \n \r \t and U+0000..U+001F control chars.
+     * Delegates to [AiPromptEscaper.escapeJsonString] for the actual implementation.
      */
-    private fun escapeJsonString(input: String): String {
-        val sb = StringBuilder(input.length + 8)
-        for (c in input) {
-            when (c) {
-                '"' -> sb.append("\\\"")
-                '\\' -> sb.append("\\\\")
-                '\n' -> sb.append("\\n")
-                '\r' -> sb.append("\\r")
-                '\t' -> sb.append("\\t")
-                '\b' -> sb.append("\\b")
-                '\u000C' -> sb.append("\\f")
-                else -> {
-                    if (c.code < 0x20) {
-                        sb.append("\\u").append("%04x".format(c.code))
-                    } else {
-                        sb.append(c)
-                    }
-                }
-            }
-        }
-        return sb.toString()
-    }
+    internal fun escapeJsonString(input: String): String = AiPromptEscaper.escapeJsonString(input)
 
     /**
      * Escape a string for safe interpolation inside XML element text content.
-     * Prevents prompt injection via '</query>' or similar XML metacharacters.
-     * Handles: & < > " '
+     * Delegates to [AiPromptEscaper.escapeXml] for the actual implementation.
      */
-    private fun escapeXml(input: String): String {
-        val sb = StringBuilder(input.length + 8)
-        for (c in input) {
-            when (c) {
-                '&' -> sb.append("&amp;")
-                '<' -> sb.append("&lt;")
-                '>' -> sb.append("&gt;")
-                '"' -> sb.append("&quot;")
-                '\'' -> sb.append("&apos;")
-                else -> sb.append(c)
-            }
-        }
-        return sb.toString()
-    }
+    internal fun escapeXml(input: String): String = AiPromptEscaper.escapeXml(input)
 }
