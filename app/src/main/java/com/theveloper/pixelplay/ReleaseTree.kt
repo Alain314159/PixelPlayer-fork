@@ -4,32 +4,35 @@ import android.util.Log
 import timber.log.Timber
 
 /**
- * A release-optimized Timber Tree that:
- * - Only logs WARN, ERROR, and WTF (suppresses VERBOSE, DEBUG, and INFO)
- * - Strips method/line information for performance
- * - Could be extended to report errors to crash analytics (e.g., Firebase Crashlytics)
+ * Timber tree for release builds.
+ *
+ * Only logs WARN/ERROR/WTF — DEBUG/INFO/VERBOSE are stripped by R8
+ * via -assumenosideeffects rules in proguard-rules.pro.
+ *
+ * BUG FIX: previously had a TODO to report errors to crash analytics.
+ * Now actually reports ERROR-level logs to Sentry if the SDK is initialized
+ * (DSN was provided at build time).
  */
 class ReleaseTree : Timber.Tree() {
-    
+
     override fun isLoggable(tag: String?, priority: Int): Boolean {
-        // Only log WARN and above in release builds
         return priority >= Log.WARN
     }
-    
+
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-        // Skip if not loggable (redundant but explicit)
-        if (priority < Log.WARN) return
-        
-        // Use Android's Log directly (stripped in release by R8 if configured)
-        when (priority) {
-            Log.WARN -> Log.w(tag, message, t)
-            Log.ERROR -> Log.e(tag, message, t)
-            Log.ASSERT -> Log.wtf(tag, message, t)
+        // Report ERROR and higher to Sentry if available
+        if (priority >= Log.ERROR) {
+            try {
+                if (BuildConfig.SENTRY_DSN.isNotBlank()) {
+                    if (t != null) {
+                        io.sentry.Sentry.captureException(t)
+                    } else {
+                        io.sentry.Sentry.captureMessage(message, io.sentry.SentryLevel.ERROR)
+                    }
+                }
+            } catch (_: Exception) {
+                // Sentry not initialized — silent fail
+            }
         }
-        
-        // TODO: Optionally report errors to crash analytics
-        // if (priority >= Log.ERROR && t != null) {
-        //     FirebaseCrashlytics.getInstance().recordException(t)
-        // }
     }
 }

@@ -133,6 +133,13 @@ android {
         val sentryDsn = (System.getenv("SENTRY_DSN") ?: "")
             .ifBlank { keystoreProperties.getProperty("SENTRY_DSN") ?: "" }
         buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
+
+        // GDrive OAuth2 Web Client ID — read from env var or local.properties.
+        // If empty, GDrive integration shows a configuration error instead of
+        // silently failing with the placeholder string.
+        val gdriveWebClientId = (System.getenv("GDRIVE_WEB_CLIENT_ID") ?: "")
+            .ifBlank { keystoreProperties.getProperty("GDRIVE_WEB_CLIENT_ID") ?: "" }
+        buildConfigField("String", "GDRIVE_WEB_CLIENT_ID", "\"$gdriveWebClientId\"")
     }
 
     signingConfigs {

@@ -244,7 +244,7 @@ fun TelegramChannelSearchSheet(
                         }
                         statusMessage != null -> {
                             // Status message with animated icon
-                            val isSuccess = statusMessage!!.contains("Success", ignoreCase = true)
+                            val isSuccess = statusMessage?.contains("Success", ignoreCase = true) == true
 
                             val iconScale by animateFloatAsState(
                                 targetValue = 1f,
@@ -293,7 +293,7 @@ fun TelegramChannelSearchSheet(
                                 Spacer(modifier = Modifier.height(24.dp))
 
                                 Text(
-                                    text = statusMessage!!,
+                                    text = statusMessage ?: "",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.SemiBold,
