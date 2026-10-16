@@ -215,16 +215,37 @@ class LibraryStateHolder @Inject constructor(
             val likedSortKeyDeferred = async { userPreferencesRepository.likedSongsSortOptionFlow.first() }
             val storageFilterDeferred = async { userPreferencesRepository.lastStorageFilterFlow.first() }
 
-            _currentSongSortOption.value =
-                SortOption.SONGS.find { it.storageKey == songSortKeyDeferred.await() } ?: SortOption.SongDefaultOrder
-            _currentAlbumSortOption.value =
-                SortOption.ALBUMS.find { it.storageKey == albumSortKeyDeferred.await() } ?: SortOption.AlbumTitleAZ
-            _currentArtistSortOption.value =
-                SortOption.ARTISTS.find { it.storageKey == artistSortKeyDeferred.await() } ?: SortOption.ArtistNameAZ
-            _currentFolderSortOption.value =
-                SortOption.FOLDERS.find { it.storageKey == folderSortKeyDeferred.await() } ?: SortOption.FolderNameAZ
-            _currentFavoriteSortOption.value =
-                SortOption.LIKED.find { it.storageKey == likedSortKeyDeferred.await() } ?: SortOption.LikedSongDateLiked
+            // BUG FIX (#2591): 'Sorting song keep coming back to default.'
+            // Race condition: if the user changes the sort option BEFORE the initial
+            // load from DataStore completes, the initial load would overwrite the
+            // user's selection with the persisted value (which is the old value).
+            // Fix: only set the sort option from DataStore if the user hasn't already
+            // changed it (i.e., the current value is still the default).
+            val songSortKey = songSortKeyDeferred.await()
+            if (_currentSongSortOption.value == SortOption.SongDefaultOrder) {
+                _currentSongSortOption.value =
+                    SortOption.SONGS.find { it.storageKey == songSortKey } ?: SortOption.SongDefaultOrder
+            }
+            val albumSortKey = albumSortKeyDeferred.await()
+            if (_currentAlbumSortOption.value == SortOption.AlbumTitleAZ) {
+                _currentAlbumSortOption.value =
+                    SortOption.ALBUMS.find { it.storageKey == albumSortKey } ?: SortOption.AlbumTitleAZ
+            }
+            val artistSortKey = artistSortKeyDeferred.await()
+            if (_currentArtistSortOption.value == SortOption.ArtistNameAZ) {
+                _currentArtistSortOption.value =
+                    SortOption.ARTISTS.find { it.storageKey == artistSortKey } ?: SortOption.ArtistNameAZ
+            }
+            val folderSortKey = folderSortKeyDeferred.await()
+            if (_currentFolderSortOption.value == SortOption.FolderNameAZ) {
+                _currentFolderSortOption.value =
+                    SortOption.FOLDERS.find { it.storageKey == folderSortKey } ?: SortOption.FolderNameAZ
+            }
+            val likedSortKey = likedSortKeyDeferred.await()
+            if (_currentFavoriteSortOption.value == SortOption.LikedSongDateLiked) {
+                _currentFavoriteSortOption.value =
+                    SortOption.LIKED.find { it.storageKey == likedSortKey } ?: SortOption.LikedSongDateLiked
+            }
             _currentStorageFilter.value = storageFilterDeferred.await()
         }
     }
