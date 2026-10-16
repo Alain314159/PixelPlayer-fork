@@ -931,6 +931,14 @@ class MainActivity : ComponentActivity() {
                             derivedStateOf { currentRoute in routesWithHiddenMiniPlayer }
                         }
 
+                        val reduceAnimations by remember {
+                            userPreferencesRepository.reduceAnimationsFlow
+                        }.collectAsStateWithLifecycle(initialValue = false)
+
+                        val backgroundBlurEnabled by remember {
+                            userPreferencesRepository.backgroundBlurEnabledFlow
+                        }.collectAsStateWithLifecycle(initialValue = true)
+
                         val miniPlayerH = with(density) { MiniPlayerHeight.toPx() }
                         val totalSheetHeightWhenContentCollapsedPx = if (showPlayerContentInitially && !shouldHideMiniPlayer) miniPlayerH else 0f
 
@@ -965,6 +973,20 @@ class MainActivity : ComponentActivity() {
                                             // every other frame.
                                             val quantizedBlurPx = (fraction * 120f / 2f).roundToInt() * 2f
                                             renderEffect = blurEffectCache.get(quantizedBlurPx)
+                                        if (!backgroundBlurEnabled) {
+                                            renderEffect = null
+                                        } else {
+                                            val discreteFraction = (fraction * 25).toInt().toFloat() / 25f
+                                            val blurPx = discreteFraction * 100f // 100px target blur at 100% expanded
+                                            if (blurPx > 0f) {
+                                                renderEffect = AndroidRenderEffect.createBlurEffect(
+                                                    blurPx,
+                                                    blurPx,
+                                                    AndroidShader.TileMode.CLAMP
+                                                ).asComposeRenderEffect()
+                                            } else {
+                                                renderEffect = null
+                                            }
                                         }
                                     }
                                 }

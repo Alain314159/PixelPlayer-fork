@@ -32,14 +32,15 @@ fun PlayingEqIcon(
     // lyrics sheet), this noticeably lowers screen-on CPU on weaker devices.
     phaseDurationMillis: Int = 3600,   // ciclo más lento
     wanderDurationMillis: Int = 12000, // patrón más largo
-    gapFraction: Float = 0.30f
+    gapFraction: Float = 0.30f,
+    reduceAnimations: Boolean = false
 ) {
     val fullRotation = (2f * PI).toFloat()
     val phaseAnim = remember { Animatable(0f) }
     val wanderAnim = remember { Animatable(0f) }
 
-    LaunchedEffect(isPlaying, phaseDurationMillis) {
-        if (!isPlaying) return@LaunchedEffect
+    LaunchedEffect(isPlaying, phaseDurationMillis, reduceAnimations) {
+        if (!isPlaying || reduceAnimations) return@LaunchedEffect
         while (isActive) {
             val start = (phaseAnim.value % fullRotation).let { if (it < 0f) it + fullRotation else it }
             phaseAnim.snapTo(start)
@@ -50,8 +51,8 @@ fun PlayingEqIcon(
         }
     }
 
-    LaunchedEffect(isPlaying, wanderDurationMillis) {
-        if (!isPlaying) return@LaunchedEffect
+    LaunchedEffect(isPlaying, wanderDurationMillis, reduceAnimations) {
+        if (!isPlaying || reduceAnimations) return@LaunchedEffect
         while (isActive) {
             val start = (wanderAnim.value % fullRotation).let { if (it < 0f) it + fullRotation else it }
             wanderAnim.snapTo(start)

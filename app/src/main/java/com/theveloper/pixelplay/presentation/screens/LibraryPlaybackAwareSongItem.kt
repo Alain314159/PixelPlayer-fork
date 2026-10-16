@@ -46,6 +46,9 @@ internal fun LibraryPlaybackAwareSongItem(
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = LibrarySongPlaybackUiState())
 
+    val playerConfig by playerViewModel.playerConfigSlice.collectAsStateWithLifecycle()
+    val reduceAnimations = playerConfig.reduceAnimations
+
     EnhancedSongListItem(
         song = song,
         isPlaying = playbackUiState.isPlaying,
@@ -57,6 +60,7 @@ internal fun LibraryPlaybackAwareSongItem(
         isSelectionMode = isSelectionMode,
         onLongPress = onLongPress,
         onMoreOptionsClick = onMoreOptionsClick,
-        onClick = onClick
+        onClick = onClick,
+        reduceAnimations = reduceAnimations
     )
 }

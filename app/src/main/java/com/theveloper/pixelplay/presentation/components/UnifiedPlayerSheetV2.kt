@@ -255,6 +255,13 @@ fun UnifiedPlayerSheetV2(
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
     val motionScheme = remember { MotionScheme.expressive() }
     val sheetAnimationSpec = remember { motionScheme.defaultSpatialSpec<Float>() }
+    val dynamicDurationMs = remember(playerConfig.reduceAnimations, playerConfig.animationSpeedScale) {
+        val scale = playerConfig.animationSpeedScale.toFloatOrNull() ?: 1.0f
+        if (playerConfig.reduceAnimations) 0 else (ANIMATION_DURATION_MS * scale).toInt()
+    }
+    val sheetAnimationSpec = remember(dynamicDurationMs) {
+        tween<Float>(durationMillis = dynamicDurationMs, easing = FastOutSlowInEasing)
+    }
     val sheetAnimationMutex = remember { MutatorMutex() }
     val sheetExpandedTargetY = 0f
     val initialY =
@@ -449,7 +456,7 @@ fun UnifiedPlayerSheetV2(
     val sheetModalOverlayController = rememberSheetModalOverlayController(
         scope = scope,
         queueSheetController = queueSheetController,
-        animationDurationMs = ANIMATION_DURATION_MS,
+        animationDurationMs = dynamicDurationMs,
         onCollapsePlayerSheet = { playerViewModel.collapsePlayerSheet() }
     )
     val pendingSaveQueueOverlay = sheetModalOverlayController.pendingSaveQueueOverlay
@@ -604,7 +611,8 @@ fun UnifiedPlayerSheetV2(
         onExpandSheetState = { playerViewModel.expandPlayerSheet() },
         onCollapseSheetState = { playerViewModel.collapsePlayerSheet() },
         onDraggingChange = sheetBackAndDragState.onDraggingChange,
-        onDraggingPlayerAreaChange = sheetBackAndDragState.onDraggingPlayerAreaChange
+        onDraggingPlayerAreaChange = sheetBackAndDragState.onDraggingPlayerAreaChange,
+        reduceAnimations = playerConfig.reduceAnimations
     )
 
     if (!actuallyShowSheetContent) return

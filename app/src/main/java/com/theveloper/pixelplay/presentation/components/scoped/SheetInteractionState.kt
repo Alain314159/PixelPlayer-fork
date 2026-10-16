@@ -53,7 +53,8 @@ internal fun rememberSheetInteractionState(
     onExpandSheetState: () -> Unit,
     onCollapseSheetState: () -> Unit,
     onDraggingChange: (Boolean) -> Unit,
-    onDraggingPlayerAreaChange: (Boolean) -> Unit
+    onDraggingPlayerAreaChange: (Boolean) -> Unit,
+    reduceAnimations: Boolean
 ): SheetInteractionState {
     val useSmoothCornersState = rememberUpdatedState(useSmoothCorners)
     val isDraggingState = rememberUpdatedState(isDragging)
@@ -83,6 +84,7 @@ internal fun rememberSheetInteractionState(
     val onCollapseSheetStateState = rememberUpdatedState(onCollapseSheetState)
     val onDraggingChangeState = rememberUpdatedState(onDraggingChange)
     val onDraggingPlayerAreaChangeState = rememberUpdatedState(onDraggingPlayerAreaChange)
+    val reduceAnimationsState = rememberUpdatedState(reduceAnimations)
 
     val sheetVerticalDragGestureHandler = remember(
         scope,
@@ -110,7 +112,8 @@ internal fun rememberSheetInteractionState(
                 onAnimateSheetState.value(targetExpanded, animationSpec, initialVelocity)
             },
             onExpandSheetState = { onExpandSheetStateState.value() },
-            onCollapseSheetState = { onCollapseSheetStateState.value() }
+            onCollapseSheetState = { onCollapseSheetStateState.value() },
+            reduceAnimationsProvider = { reduceAnimationsState.value }
         )
     }
 

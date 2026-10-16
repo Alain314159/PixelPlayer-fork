@@ -42,7 +42,8 @@ internal class SheetVerticalDragGestureHandler(
         initialVelocity: Float
     ) -> Unit,
     private val onExpandSheetState: () -> Unit,
-    private val onCollapseSheetState: () -> Unit
+    private val onCollapseSheetState: () -> Unit,
+    private val reduceAnimationsProvider: () -> Boolean
 ) {
     private var initialFractionOnDragStart = 0f
     private var initialYOnDragStart = 0f
@@ -107,31 +108,50 @@ internal class SheetVerticalDragGestureHandler(
             currentFraction = currentFraction
         )
 
+        val reduceAnims = reduceAnimationsProvider()
+
         scope.launch {
             if (targetState == PlayerSheetState.EXPANDED) {
                 launch {
-                    onAnimateSheet(true, null, 0f)
+                    if (reduceAnims) {
+                        onAnimateSheet(
+                            true,
+                            spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            ),
+                            0f
+                        )
+                    } else {
+                        onAnimateSheet(true, null, 0f)
+                    }
                 }
                 onExpandSheetState()
             } else {
-                val dynamicDamping = collapseSpringDampingForFraction(currentFraction)
-                launch {
-                    val initialSquash = collapseInitialSquashForFraction(currentFraction)
-                    visualOvershootScaleY.snapTo(initialSquash)
-                    visualOvershootScaleY.animateTo(
-                        targetValue = 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessVeryLow
+                val dynamicDamping = if (reduceAnims) Spring.DampingRatioNoBouncy else collapseSpringDampingForFraction(currentFraction)
+                val stiffness = if (reduceAnims) Spring.StiffnessMedium else Spring.StiffnessLow
+                
+                if (!reduceAnims) {
+                    launch {
+                        val initialSquash = collapseInitialSquashForFraction(currentFraction)
+                        visualOvershootScaleY.snapTo(initialSquash)
+                        visualOvershootScaleY.animateTo(
+                            targetValue = 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessVeryLow
+                            )
                         )
-                    )
+                    }
+                } else {
+                    visualOvershootScaleY.snapTo(1f)
                 }
                 launch {
                     onAnimateSheet(
                         false,
                         spring(
                             dampingRatio = dynamicDamping,
-                            stiffness = Spring.StiffnessLow
+                            stiffness = stiffness
                         ),
                         verticalVelocity
                     )

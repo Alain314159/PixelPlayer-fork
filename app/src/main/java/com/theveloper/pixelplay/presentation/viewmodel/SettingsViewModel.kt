@@ -98,6 +98,9 @@ data class SettingsUiState(
     val animatedLyricsBlurEnabled: Boolean = true,
     val animatedLyricsBlurStrength: Float = 2.5f,
     val disableBlurAllOver: Boolean = false,
+    val reduceAnimations: Boolean = false,
+    val animationSpeedScale: String = "1.0",
+    val backgroundBlurEnabled: Boolean = true,
     val backupInfoDismissed: Boolean = false,
     val isDataTransferInProgress: Boolean = false,
     val restorePlan: RestorePlan? = null,
@@ -173,6 +176,9 @@ private sealed interface SettingsUiUpdate {
         val animatedLyricsBlurStrength: Float,
         val disableBlurAllOver: Boolean,
         val showScrollbar: Boolean
+        val reduceAnimations: Boolean,
+        val animationSpeedScale: String,
+        val backgroundBlurEnabled: Boolean
     ) : SettingsUiUpdate
 }
 
@@ -666,6 +672,9 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.animatedLyricsBlurStrengthFlow,
                 userPreferencesRepository.disableBlurAllOverFlow,
                 userPreferencesRepository.showScrollbarFlow
+                userPreferencesRepository.reduceAnimationsFlow,
+                userPreferencesRepository.animationSpeedScaleFlow,
+                userPreferencesRepository.backgroundBlurEnabledFlow
             ) { values ->
                 SettingsUiUpdate.Group2(
                     keepPlayingInBackground = values[0] as Boolean,
@@ -688,6 +697,24 @@ class SettingsViewModel @Inject constructor(
                     animatedLyricsBlurStrength = values[17] as Float,
                     disableBlurAllOver = values[18] as Boolean,
                     showScrollbar = values[19] as Boolean
+                    resumeOnHeadsetReconnect = values[2] as Boolean,
+                    showQueueHistory = values[3] as Boolean,
+                    isCrossfadeEnabled = values[4] as Boolean,
+                    hiFiModeEnabled = values[5] as Boolean,
+                    crossfadeDuration = values[6] as Int,
+                    persistentShuffleEnabled = values[7] as Boolean,
+                    folderBackGestureNavigation = values[8] as Boolean,
+                    lyricsSourcePreference = values[9] as LyricsSourcePreference,
+                    autoScanLrcFiles = values[10] as Boolean,
+                    blockedDirectories = @Suppress("UNCHECKED_CAST") (values[11] as Set<String>),
+                    hapticsEnabled = values[12] as Boolean,
+                    immersiveLyricsEnabled = values[13] as Boolean,
+                    immersiveLyricsTimeout = values[14] as Long,
+                    animatedLyricsBlurEnabled = values[15] as Boolean,
+                    animatedLyricsBlurStrength = values[16] as Float,
+                    reduceAnimations = values[17] as Boolean,
+                    animationSpeedScale = values[18] as String,
+                    backgroundBlurEnabled = values[19] as Boolean
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -712,6 +739,9 @@ class SettingsViewModel @Inject constructor(
                         animatedLyricsBlurStrength = update.animatedLyricsBlurStrength,
                         disableBlurAllOver = update.disableBlurAllOver,
                         showScrollbar = update.showScrollbar
+                        reduceAnimations = update.reduceAnimations,
+                        animationSpeedScale = update.animationSpeedScale,
+                        backgroundBlurEnabled = update.backgroundBlurEnabled
                     )
                 }
             }
@@ -1120,6 +1150,21 @@ class SettingsViewModel @Inject constructor(
     fun setDisableBlurAllOver(disabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setDisableBlurAllOver(disabled)
+    fun setReduceAnimations(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setReduceAnimations(enabled)
+        }
+    }
+
+    fun setAnimationSpeedScale(scale: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.setAnimationSpeedScale(scale)
+        }
+    }
+
+    fun setBackgroundBlurEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setBackgroundBlurEnabled(enabled)
         }
     }
 

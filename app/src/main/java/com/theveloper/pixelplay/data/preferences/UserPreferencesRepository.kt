@@ -218,6 +218,9 @@ constructor(
         val USE_ANIMATED_LYRICS = booleanPreferencesKey("use_animated_lyrics")
         val ANIMATED_LYRICS_BLUR_ENABLED = booleanPreferencesKey("animated_lyrics_blur_enabled")
         val ANIMATED_LYRICS_BLUR_STRENGTH = androidx.datastore.preferences.core.floatPreferencesKey("animated_lyrics_blur_strength")
+        val REDUCE_ANIMATIONS = booleanPreferencesKey("reduce_animations")
+        val ANIMATION_SPEED_SCALE = stringPreferencesKey("animation_speed_scale")
+        val BACKGROUND_BLUR_ENABLED = booleanPreferencesKey("background_blur_enabled")
 
         // Genre View Preference
         val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
@@ -1406,6 +1409,39 @@ constructor(
     suspend fun setAnimatedLyricsBlurStrength(strength: Float) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.ANIMATED_LYRICS_BLUR_STRENGTH] = strength
+        }
+    }
+
+    val reduceAnimationsFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.REDUCE_ANIMATIONS] ?: false
+        }
+
+    suspend fun setReduceAnimations(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REDUCE_ANIMATIONS] = enabled
+        }
+    }
+
+    val animationSpeedScaleFlow: Flow<String> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.ANIMATION_SPEED_SCALE] ?: "1.0"
+        }
+
+    suspend fun setAnimationSpeedScale(scale: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ANIMATION_SPEED_SCALE] = scale
+        }
+    }
+
+    val backgroundBlurEnabledFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.BACKGROUND_BLUR_ENABLED] ?: true
+        }
+
+    suspend fun setBackgroundBlurEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.BACKGROUND_BLUR_ENABLED] = enabled
         }
     }
 

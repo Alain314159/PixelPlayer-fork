@@ -99,7 +99,8 @@ fun EnhancedSongListItem(
     showMoreOptionsButton: Boolean = true,
     onLongPress: () -> Unit = {},
     onMoreOptionsClick: (Song) -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    reduceAnimations: Boolean = false
 ) {
     val albumArtTargetSizePx = with(LocalDensity.current) { albumArtSize.roundToPx() }
     val isHighlighted = isCurrentSong && !isLoading
@@ -367,7 +368,8 @@ fun EnhancedSongListItem(
                              .padding(start = 8.dp)
                              .size(width = 18.dp, height = 16.dp),
                          color = contentColor,
-                         isPlaying = isPlaying
+                         isPlaying = isPlaying,
+                         reduceAnimations = reduceAnimations
                      )
                 }
 
