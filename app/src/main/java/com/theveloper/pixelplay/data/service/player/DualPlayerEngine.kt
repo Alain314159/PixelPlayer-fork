@@ -234,7 +234,7 @@ class DualPlayerEngine @Inject constructor(
         // for the whole session (losing the battery saving) and rebuild the player (an
         // audible glitch right after the fade). This keeps offload enabled across crossfades.
         private const val POST_TRANSITION_OFFLOAD_GUARD_MS = 2_000L
-        private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
+        private const val MAX_AUXILIARY_TIMELINE_ITEMS = 1000
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
         private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "netease", "qqmusic", "navidrome", "jellyfin", "gdrive")
         // Subset of REMOTE_MEDIA_SCHEMES: schemes that need proxy resolution.
@@ -383,8 +383,20 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("TransitionDebug").d("AudioFocus GAIN. Resuming if paused by loss.")
                 if (isFocusLossPause) {
                     isFocusLossPause = false
-                    playerA.playWhenReady = true
-                    if (transitionRunning) playerB?.playWhenReady = true
+                    // BUG FIX (#2853): previously, setting playWhenReady = true here would trigger
+                    // onPlayWhenReadyChanged(true, ...) which calls requestAudioFocus(). If the
+                    // system immediately grants focus (common case), requestAudioFocus() returns
+                    // early (audioFocusRequest != null). But on some OEM ROMs (Samsung One UI 8.x),
+                    // the system bounces focus between DELAYED and GRANT rapidly, causing a loop:
+                    // play → DELAYED → pause → GAIN → play → DELAYED → pause → ...
+                    //
+                    // Fix: check that we're not already playing before setting playWhenReady.
+                    // Also, don't re-request focus here — we already have it (audioFocusRequest
+                    // was set when we first requested it, even if DELAYED).
+                    if (!playerA.isPlaying && playerA.playbackState != Player.STATE_IDLE) {
+                        playerA.playWhenReady = true
+                        if (transitionRunning) playerB?.playWhenReady = true
+                    }
                 }
             }
         }

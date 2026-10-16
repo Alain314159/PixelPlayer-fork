@@ -1531,6 +1531,30 @@ class MusicService : MediaLibraryService() {
 
         override fun onPlayerError(error: PlaybackException) {
             Timber.tag(TAG).e(error, "Error en el reproductor: ")
+
+            // BUG FIX (#2851): "Source error" on certain local tracks.
+            // When ExoPlayer encounters a PlaybackException with ERROR_CODE_IO_UNSPECIFIED
+            // or ERROR_CODE_SOURCE, the player enters STATE_IDLE. Previously we just showed
+            // a toast and left the player in STATE_IDLE — the user had to manually skip.
+            //
+            // Fix: for transient IO errors (ERROR_CODE_IO_*, ERROR_CODE_SOURCE), automatically
+            // skip to the next track after showing the toast. This matches user expectation:
+            // "if a song fails, move on to the next one instead of stopping playback entirely."
+            //
+            // For ERROR_CODE_DECODER_* errors, we also skip — these are typically codec
+            // incompatibilities that won't resolve by retrying the same file.
+            val errorCode = error.errorCode
+            val isSkipableError = errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ||
+                errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+                errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+                errorCode == PlaybackException.ERROR_CODE_IO_POSITION_OUT_OF_RANGE ||
+                errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+                errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
+                errorCode == PlaybackException.ERROR_CODE_SOURCE
+
             serviceScope.launch {
                 val currentMediaItem = mediaSession?.player?.currentMediaItem
                 val trackTitle = currentMediaItem?.mediaMetadata?.title?.toString()
@@ -1539,6 +1563,21 @@ class MusicService : MediaLibraryService() {
                 val errorMessage = error.localizedMessage ?: error.message ?: "Unknown error"
                 val toastMessage = getString(R.string.player_playback_error, "$trackTitle ($errorMessage)")
                 android.widget.Toast.makeText(this@MusicService, toastMessage, android.widget.Toast.LENGTH_LONG).show()
+
+                // Auto-skip to next track for skipable errors (IO / decoder / source).
+                // This prevents playback from stopping entirely when one file is corrupt
+                // or inaccessible — the rest of the queue continues.
+                if (isSkipableError) {
+                    val player = mediaSession?.player ?: engine.masterPlayer
+                    if (player.hasNextMediaItem()) {
+                        Timber.tag(TAG).w("Auto-skipping to next track after error code $errorCode")
+                        player.seekToNext()
+                        player.prepare()
+                        player.play()
+                    } else {
+                        Timber.tag(TAG).w("No next track to skip to after error code $errorCode — stopping playback")
+                    }
+                }
             }
         }
     }
@@ -1605,20 +1644,41 @@ class MusicService : MediaLibraryService() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // Release in-process bitmap caches when the system signals memory pressure.
-        // MusicService holds up to ~220 KB in cachedWidgetArtBytes and another copy
-        // inside lastWidgetPlayerInfo.albumArtBitmapData. Under moderate-to-critical
-        // pressure these are safe to drop — the next widget update cycle will reload them.
         //
-        // Raw int value used instead of deprecated ComponentCallbacks2 constant:
-        //   TRIM_MEMORY_RUNNING_LOW = 10
-        // This single threshold covers all higher-severity levels too
-        // (TRIM_MEMORY_BACKGROUND = 40, TRIM_MEMORY_COMPLETE = 80, etc.).
-        if (level >= 10 /* TRIM_MEMORY_RUNNING_LOW */) {
-            Timber.tag(TAG).d("onTrimMemory(level=%d): releasing widget bitmap caches", level)
+        // BUG FIX (#2846): OOM crash with "target footprint 268435456" (256MB).
+        // On devices with low heap (256MB process limit), the app crashes during
+        // library scanning because it accumulates too many decoded bitmaps.
+        //
+        // Fix: lower the threshold for cache release from TRIM_MEMORY_RUNNING_LOW (10)
+        // to TRIM_MEMORY_RUNNING_MODERATE (5), and also clear the Coil image cache
+        // and the resolvedUriCache under moderate pressure.
+        val TAG = "MusicService"
+
+        // TRIM_MEMORY_RUNNING_MODERATE (5) — the device is running moderately low on memory.
+        // Release Coil's memory cache + resolvedUriCache to prevent OOM.
+        if (level >= 5 /* TRIM_MEMORY_RUNNING_MODERATE */) {
+            Timber.tag(TAG).d("onTrimMemory(level=%d): releasing widget art + Coil cache + resolvedUriCache", level)
             invalidateCachedWidgetArtwork()
-            // Drop the stale PlayerInfo copy so its embedded ByteArray is GC-eligible.
-            // The next widget update cycle will rebuild it from scratch.
             widgetUpdateManager.clearCachedState()
+            engine.clearResolvedUriCache()
+            // Clear Coil's memory cache — this is the biggest cache in the app (40MB).
+            // The disk cache is preserved so images reload quickly.
+            try {
+                val coilLoader = coil.Coil.imageLoader(this)
+                coilLoader.memoryCache?.clear()
+            } catch (e: Exception) {
+                Timber.tag(TAG).w(e, "Failed to clear Coil memory cache")
+            }
+        }
+
+        // TRIM_MEMORY_RUNNING_LOW (10) — also release the library state holder's caches.
+        if (level >= 10 /* TRIM_MEMORY_RUNNING_LOW */) {
+            Timber.tag(TAG).d("onTrimMemory(level=%d): releasing library + theme caches", level)
+            try {
+                libraryStateHolder.get().trimMemory(level)
+            } catch (e: Exception) {
+                // LibraryStateHolder may not be initialized yet
+            }
         }
     }
 
