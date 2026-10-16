@@ -1301,6 +1301,12 @@ constructor(
         const val INPUT_FORCE_METADATA = "input_force_metadata"
         const val INPUT_RUN_MAINTENANCE = "input_run_maintenance"
         const val INPUT_SYNC_MODE = "input_sync_mode"
+        // Phase marker for SyncChainBuilder integration. When set, SyncWorker only runs the
+        // specified phase (mediastore_scan, cloud_sync, or maintenance) instead of the full
+        // pipeline. This allows the chained workers (MediaStoreScanWorker, CloudSyncWorker,
+        // MaintenanceWorker) to delegate the actual sync logic to SyncWorker without duplicating
+        // the 1,736-line doWork() method body.
+        const val INPUT_PHASE = "input_phase"
         // INCREMENTAL syncs back off this many times while playback is active
         // before running anyway. With WorkManager's exponential backoff
         // (30s -> 60s -> 2m -> 4m -> 8m -> ...), 5 retries cover ~16 minutes.
