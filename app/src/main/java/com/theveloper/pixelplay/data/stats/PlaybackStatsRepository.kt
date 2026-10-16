@@ -5,6 +5,8 @@ import android.util.AtomicFile
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.reflect.TypeToken
+import com.theveloper.pixelplay.data.database.PlaybackEventDao
+import com.theveloper.pixelplay.data.database.PlaybackEventEntity
 import com.theveloper.pixelplay.data.model.Song
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -37,13 +39,17 @@ import timber.log.Timber
 
 @Singleton
 class PlaybackStatsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val playbackEventDao: PlaybackEventDao
 ) {
 
     private val gson = Gson()
+    // Legacy JSON file kept ONLY for migration import on v42 → v43 upgrade.
+    // After the one-time import the file is deleted and all writes go through playbackEventDao.
     private val historyFile = File(context.filesDir, "playback_history.json")
     private val atomicHistoryFile = AtomicFile(historyFile)
     private val fileLock = Any()
+    @Volatile private var legacyJsonImported: Boolean = !historyFile.exists()
     private var cachedEvents: List<PlaybackEvent>? = null  // guarded by fileLock
     private val eventsType = object : TypeToken<MutableList<PlaybackEvent>>() {}.type
     private val _refreshVersion = MutableStateFlow(0L)
@@ -172,23 +178,67 @@ class PlaybackStatsRepository @Inject constructor(
         val coercedTimestamp = timestamp.coerceAtLeast(0L)
         val coercedDuration = durationMs.coerceAtLeast(0L)
         val start = (coercedTimestamp - coercedDuration).coerceAtLeast(0L)
-        val sanitizedEvent = PlaybackEvent(
+        // BUG FIX (8.1, 8.2): previously this wrote the ENTIRE 2-year history JSON file on
+        // every recordPlayback call (~5MB JSON + fd.sync()), with optimistic-concurrency
+        // retries that could drop concurrent writes. Now we use a single Room insert which
+        // is atomic, transactional, and indexed for fast range queries.
+        playbackEventDao.recordPlay(
             songId = songId,
             timestamp = coercedTimestamp,
             durationMs = coercedDuration,
             startTimestamp = start,
             endTimestamp = coercedTimestamp
         )
-        val writeSucceeded = updateEventsAtomically { events ->
-            val cutoff = sanitizedEvent.endMillis() - MAX_HISTORY_AGE_MS
-            if (cutoff > 0) {
-                events.removeAll { it.endMillis() < cutoff }
-            }
-            events += sanitizedEvent
-            events
+        // Periodic cleanup of events older than the 2-year retention window.
+        // Cheap because the index on timestamp makes this a range delete.
+        val cutoff = coercedTimestamp - MAX_HISTORY_AGE_MS
+        if (cutoff > 0) {
+            playbackEventDao.deleteEventsOlderThan(cutoff)
         }
-        if (writeSucceeded) {
-            notifyStatsChanged()
+        // Invalidate the in-memory cache (used by read paths) so the next loadSummary
+        // re-reads from Room.
+        synchronized(fileLock) { cachedEvents = null }
+        notifyStatsChanged()
+    }
+
+    /**
+     * One-time import of the legacy playback_history.json file into the Room table.
+     * Called from PixelPlayApplication.onCreate() after Hilt is initialized.
+     * Idempotent — uses the legacyJsonImported flag and deletes the JSON file on success.
+     */
+    suspend fun importLegacyJsonFileIfNeeded() = withContext(Dispatchers.IO) {
+        if (legacyJsonImported) return@withContext
+        if (!historyFile.exists()) {
+            legacyJsonImported = true
+            return@withContext
+        }
+        try {
+            val events = readEvents()
+            if (events.isEmpty()) {
+                legacyJsonImported = true
+                historyFile.delete()
+                return@withContext
+            }
+            val entities = events.map { ev ->
+                PlaybackEventEntity(
+                    songId = ev.songId,
+                    timestamp = ev.timestamp,
+                    durationMs = ev.durationMs,
+                    startTimestamp = ev.startTimestamp,
+                    endTimestamp = ev.endTimestamp
+                )
+            }
+            // Insert in chunks of 500 to avoid SQLite parameter limits.
+            entities.chunked(500).forEach { chunk ->
+                playbackEventDao.insertEvents(chunk)
+            }
+            Timber.tag("PlaybackStats").i("Imported ${entities.size} legacy playback events into Room")
+            legacyJsonImported = true
+            // Delete the JSON file — we no longer need it.
+            historyFile.delete()
+        } catch (e: Exception) {
+            Timber.tag("PlaybackStats").e(e, "Failed to import legacy playback_history.json")
+            // Don't mark as imported so we retry next launch.
         }
     }
 
@@ -198,7 +248,33 @@ class PlaybackStatsRepository @Inject constructor(
         nowMillis: Long = System.currentTimeMillis()
     ): PlaybackStatsSummary = withContext(Dispatchers.IO) {
         val zoneId = ZoneId.systemDefault()
-        val allEvents = readEvents()
+        // BUG FIX (8.3): previously this loaded the entire 2-year playback history into memory
+        // (potentially 73k+ events × ~40 bytes = ~3MB of heap) just to compute a summary for
+        // a small time range. Now we query Room only for events in the requested range.
+        val nowInstant = Instant.ofEpochMilli(nowMillis)
+        val fromMs = when (range) {
+            StatsTimeRange.DAY -> nowInstant.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant().toEpochMilli()
+            StatsTimeRange.WEEK -> nowInstant.atZone(zoneId).toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            StatsTimeRange.MONTH -> nowInstant.atZone(zoneId).toLocalDate().withDayOfMonth(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            StatsTimeRange.YEAR -> nowInstant.atZone(zoneId).toLocalDate().withDayOfYear(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            StatsTimeRange.ALL -> 0L
+        }
+        val toMs = nowMillis
+        val allEvents = if (legacyJsonImported) {
+            // Read from Room — bounded by the time range, not the entire history.
+            playbackEventDao.getEventsInRange(fromMs, toMs).map { entity ->
+                PlaybackEvent(
+                    songId = entity.songId,
+                    timestamp = entity.timestamp,
+                    durationMs = entity.durationMs,
+                    startTimestamp = entity.startTimestamp,
+                    endTimestamp = entity.endTimestamp
+                )
+            }
+        } else {
+            // Fallback: read from legacy JSON file (pre-migration).
+            readEvents().filter { ev -> ev.timestamp in fromMs..toMs }
+        }
         buildSummaryFromEvents(
             range = range,
             songs = songs,

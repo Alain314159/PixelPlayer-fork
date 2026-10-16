@@ -34,9 +34,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         JellyfinSongEntity::class,
         JellyfinPlaylistEntity::class,
         AiCacheEntity::class,
-        AiUsageEntity::class
+        AiUsageEntity::class,
+        PlaybackEventEntity::class
     ],
-    version = 42,
+    version = 43,
     exportSchema = true
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
@@ -56,6 +57,7 @@ abstract class PixelPlayDatabase : RoomDatabase() {
     abstract fun jellyfinDao(): JellyfinDao
     abstract fun aiCacheDao(): AiCacheDao
     abstract fun aiUsageDao(): AiUsageDao
+    abstract fun playbackEventDao(): PlaybackEventDao
 
     companion object {
         // Gap-bridging no-op migrations for missing version ranges.
@@ -906,6 +908,36 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS index_songs_parent_directory_path_source_type_id " +
                         "ON songs(parent_directory_path, source_type, id)"
                 )
+            }
+        }
+
+        /**
+         * MIGRATION_42_43: add the playback_events table.
+         *
+         * Replaces the JSON-file-based PlaybackStatsRepository which had race conditions
+         * on AtomicFile, required loading all events into memory for summary computation,
+         * and rewrote the entire 2-year history on every recordPlay call.
+         *
+         * The existing playback_history.json is imported into the new table on first launch
+         * after upgrade (see PlaybackStatsRepository.importLegacyJsonFileIfNeeded()).
+         */
+        val MIGRATION_42_43 = object : Migration(42, 43) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS playback_events (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        songId TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        startTimestamp INTEGER,
+                        endTimestamp INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playback_events_timestamp ON playback_events(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playback_events_songId ON playback_events(songId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playback_events_timestamp_songId ON playback_events(timestamp, songId)")
             }
         }
 
