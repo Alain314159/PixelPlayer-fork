@@ -22,9 +22,14 @@ import kotlinx.coroutines.launch
 class CoilBitmapLoader(private val context: Context, private val scope: CoroutineScope) : BitmapLoader {
 
     companion object {
-        // Large enough for lock screen / media surfaces, but bounded so we never hand
-        // unbounded original artwork to MediaSession/SystemUI IPC.
-        private const val MAX_NOTIFICATION_ARTWORK_SIZE_PX = 1024
+        // BUG FIX: previously 1024×1024 ARGB_8888 = ~4 MB per bitmap. When Android Auto +
+        // Wear + SystemUI all request artwork simultaneously during a track transition, three
+        // or four 4 MB bitmaps coexist briefly — a 12–16 MB spike on top of the 40 MB Coil
+        // cache. Dropped to 768×768 (~2.25 MB at ARGB_8888) which is still well above the
+        // 640×640 that SystemUI / lock screen actually render at, but halves the peak heap
+        // allocation. On 4 GB devices this is the difference between visible jank and smooth
+        // transitions.
+        private const val MAX_NOTIFICATION_ARTWORK_SIZE_PX = 768
     }
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {

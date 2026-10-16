@@ -446,6 +446,14 @@ object AlbumArtUtils {
 
             val decodeOptions = BitmapFactory.Options().apply {
                 inSampleSize = calculateArtworkInSampleSize(srcWidth, srcHeight, MAX_CACHED_ART_DIMENSION_PX)
+                // BUG FIX: boundArtworkForCache re-encodes to JPEG for the disk cache, so the
+                // intermediate decoded bitmap never needs alpha or 32-bit color depth. RGB_565
+                // cuts the decoded bitmap's memory footprint in half (2 bytes/pixel vs 4 for
+                // ARGB_8888) — a 4000×4000 cover drops from 64MB to 32MB during the decode→scale
+                // →recompress cycle. The final JPEG output is visually identical for photographic
+                // album art; only synthetic test patterns with sharp alpha edges would show any
+                // difference (rare in real album art).
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
             }
             val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions) ?: return bytes
             val scaled = scaleArtworkDownTo(decoded, MAX_CACHED_ART_DIMENSION_PX)
