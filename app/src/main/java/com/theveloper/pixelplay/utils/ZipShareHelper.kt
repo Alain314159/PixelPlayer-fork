@@ -13,7 +13,8 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -57,7 +58,11 @@ object ZipShareHelper {
             cleanupOldZips(zipDir)
             
             // Generate unique filename
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            // Use DateTimeFormatter (thread-safe) instead of SimpleDateFormat (not thread-safe).
+            val timestamp = DateTimeFormatter
+                .ofPattern("yyyyMMdd_HHmmss", Locale.US)
+                .withZone(ZoneId.systemDefault())
+                .format(java.time.Instant.ofEpochMilli(System.currentTimeMillis()))
             val zipFile = File(zipDir, "PixelPlay_Songs_$timestamp.zip")
             
             // Create ZIP file

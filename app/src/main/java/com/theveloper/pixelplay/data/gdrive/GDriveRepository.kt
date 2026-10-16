@@ -502,9 +502,13 @@ class GDriveRepository @Inject constructor(
         }
 
         val dateModified = try {
-            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
-                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-                .parse(modifiedTime)?.time ?: System.currentTimeMillis()
+            // Use DateTimeFormatter (thread-safe) instead of SimpleDateFormat (not thread-safe).
+            java.time.Instant.from(
+                java.time.format.DateTimeFormatter
+                    .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'X'")
+                    .withZone(java.time.ZoneOffset.UTC)
+                    .parse(modifiedTime)
+            ).toEpochMilli()
         } catch (e: Exception) {
             System.currentTimeMillis()
         }

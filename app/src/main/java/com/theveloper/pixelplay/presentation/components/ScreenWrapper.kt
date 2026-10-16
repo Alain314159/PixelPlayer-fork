@@ -72,7 +72,10 @@ fun ScreenWrapper(
     val visibleEntriesState by navController.visibleEntries.collectAsState()
     val currentBackStackEntryState by navController.currentBackStackEntryAsState()
 
-    val syncVisibleEntries = navController.visibleEntries.collectAsState().value.also { _ -> visibleEntriesState }
+    // BUG FIX: previously this was a second `collectAsState()` on `navController.visibleEntries`,
+    // creating a duplicate Flow subscription and doubling the per-navigation recomposition work.
+    // Use the already-collected state above instead.
+    val syncVisibleEntries = visibleEntriesState
 
     val myEntry = lifecycleOwner as? androidx.navigation.NavBackStackEntry
     val myRoute = myEntry?.destination?.route
