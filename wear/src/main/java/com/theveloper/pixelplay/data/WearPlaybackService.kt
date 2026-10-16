@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -29,6 +30,25 @@ class WearPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
 
+    /**
+     * Listener that stops the service when playback reaches STATE_ENDED (i.e. the last song
+     * finished with REPEAT_MODE_OFF). Without this, ExoPlayer keeps `playWhenReady=true` after
+     * reaching STATE_END, so the previous `onTaskRemoved` check (which only inspected
+     * `playWhenReady`) did not call `stopSelf()` — leaving the foreground notification pinned
+     * forever and draining the watch battery.
+     */
+    private val endOfPlaybackListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) {
+                val p = player
+                if (p == null || p.mediaItemCount == 0 || p.repeatMode == Player.REPEAT_MODE_OFF) {
+                    Timber.tag(TAG).d("Playback ended with empty queue / no repeat — stopping service")
+                    stopSelf()
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -45,6 +65,7 @@ class WearPlaybackService : MediaSessionService() {
             // decoding stalls a few seconds after the display turns off.
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        exoPlayer.addListener(endOfPlaybackListener)
         player = exoPlayer
 
         mediaSession = MediaSession.Builder(this, exoPlayer)
@@ -59,14 +80,17 @@ class WearPlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // If the user swipes the app away while nothing is playing, there's nothing to keep alive.
+        // If the user swipes the app away while nothing is actively playing, there's nothing to
+        // keep alive. Note: checking `isPlaying` (not `playWhenReady`) so we also stop when the
+        // player reached STATE_ENDED with playWhenReady=true (Media3 default).
         val activePlayer = player
-        if (activePlayer == null || !activePlayer.playWhenReady || activePlayer.mediaItemCount == 0) {
+        if (activePlayer == null || !activePlayer.isPlaying) {
             stopSelf()
         }
     }
 
     override fun onDestroy() {
+        player?.removeListener(endOfPlaybackListener)
         mediaSession?.release()
         mediaSession = null
         player?.release()

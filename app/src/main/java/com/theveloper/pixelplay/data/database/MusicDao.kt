@@ -238,6 +238,16 @@ interface MusicDao {
     @Query("DELETE FROM lyrics WHERE songId IN (:songIds)")
     suspend fun deleteLyricsBySongIds(songIds: List<Long>)
 
+    // BUG FIX (A2): Previously, deleting songs left orphaned rows in playlist_songs and
+    // song_engagements because they had no FK CASCADE and these deletes were never invoked.
+    // Playlists silently accumulated phantom song IDs and listening stats referenced deleted
+    // songs forever.
+    @Query("DELETE FROM playlist_songs WHERE song_id IN (:songIds)")
+    suspend fun deletePlaylistSongsBySongIds(songIds: List<Long>)
+
+    @Query("DELETE FROM song_engagements WHERE song_id IN (:songIds)")
+    suspend fun deleteEngagementsBySongIds(songIds: List<Long>)
+
     @Query("SELECT id FROM songs WHERE source_type = 1")
     suspend fun getAllTelegramSongIds(): List<Long>
 
@@ -280,6 +290,11 @@ interface MusicDao {
             deleteCrossRefsBySongIds(chunk)
             deleteFavoritesBySongIds(chunk)
             deleteLyricsBySongIds(chunk)
+            // BUG FIX (A2): also clean up playlist_songs and song_engagements so they don't
+            // accumulate phantom references to deleted songs. Previously these rows were
+            // never removed because there was no FK CASCADE on the entities.
+            deletePlaylistSongsBySongIds(chunk)
+            deleteEngagementsBySongIds(chunk)
             deleteSongsByIds(chunk)
         }
         deleteOrphanedAlbums()

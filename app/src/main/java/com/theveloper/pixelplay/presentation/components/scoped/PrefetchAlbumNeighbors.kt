@@ -24,7 +24,11 @@ fun PrefetchAlbumNeighborsImg(
 ) {
     if (current == null) return
     val context = LocalContext.current
-    val loader = remember { coil.ImageLoader(context) }
+    // Use the singleton ImageLoader configured in PixelPlayApplication (with the 40MB memory
+    // cache and shared OkHttp client) instead of creating a new ImageLoader per composable.
+    // Creating a new ImageLoader allocates its own caches (default 25% of available heap,
+    // easily 64-128MB on a 4GB device) and OkHttp connection pool — and is never .shutdown()'d.
+    val loader = remember { coil.Coil.imageLoader(context) }
     val index = remember(current, queue) { queue.indexOfFirst { it.id == current.id } }
     LaunchedEffect(index, queue) {
         if (index == -1) return@LaunchedEffect

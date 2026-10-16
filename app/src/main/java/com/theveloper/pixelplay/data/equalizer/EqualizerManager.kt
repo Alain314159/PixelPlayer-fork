@@ -353,6 +353,14 @@ class EqualizerManager @Inject constructor() {
                     "error" to (e.message ?: e.javaClass.simpleName)
                 )
             }
+            // BUG FIX (E1): previously, only the inner try (around the Equalizer ctor) set
+            // effectsDisabledForProcess when the EQ ctor threw. If a later init (bassBoost,
+            // virtualizer, loudnessEnhancer) threw, the outer catch here would call release()
+            // but NOT set effectsDisabledForProcess. The next audio-session change would
+            // re-enter attachToAudioSessionIfNeeded, see hasAnyEnabledEffects=true, and retry
+            // — hitting the same OEM failure and throwing again, in an endless loop on every
+            // track change. Mark the process as disabled here too so we stop retrying.
+            effectsDisabledForProcess = true
             release()
         }
     }
