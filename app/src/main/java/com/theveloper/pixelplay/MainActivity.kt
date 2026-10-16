@@ -380,6 +380,10 @@ class MainActivity : ComponentActivity() {
 
             intent.getBooleanExtra("ACTION_SHOW_PLAYER", false) -> {
                 playerViewModel.showPlayer()
+                // Clear the boolean extra so that on configuration change (rotation, dark-mode
+                // toggle, etc.) the same intent instance does not re-trigger showPlayer() and
+                // unexpectedly pop the player sheet open again.
+                intent.removeExtra("ACTION_SHOW_PLAYER")
             }
 
             intent.action == android.content.Intent.ACTION_VIEW && intent.data != null -> {

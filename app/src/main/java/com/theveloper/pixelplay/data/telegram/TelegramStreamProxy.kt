@@ -196,12 +196,26 @@ class TelegramStreamProxy @Inject constructor(
                             // CPU heat on weaker devices during cloud playback.
                             var stallDelayMs = 50L
                             val maxStallDelayMs = 400L
+                            // Overall stall timeout: if we wait more than 60s without any new bytes
+                            // downloaded, abort the stream with a 503 to the client. Without this
+                            // cap, a single stalled Telegram download would leave a coroutine
+                            // polling getFile() every 400ms for the lifetime of the process,
+                            // draining CPU and battery.
+                            val stallDeadlineMs = System.currentTimeMillis() + 60_000L
 
                             raf.seek(currentPos)
 
                             var cachedDownloadedPrefixSize = fileInfo.local.downloadedPrefixSize
 
                             while (true) {
+                                // Hard stop: if we've been stalled for >60s overall, break.
+                                if (System.currentTimeMillis() > stallDeadlineMs) {
+                                    call.respond(
+                                        HttpStatusCode.ServiceUnavailable,
+                                        "Telegram download stalled for more than 60 seconds"
+                                    )
+                                    return@get
+                                }
                                 // 1. Check if we've reached the end of the requested range
                                 val remaining = end - currentPos + 1
                                 if (remaining <= 0) break

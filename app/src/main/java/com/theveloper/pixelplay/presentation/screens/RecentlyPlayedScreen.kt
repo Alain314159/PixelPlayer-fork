@@ -168,7 +168,11 @@ fun RecentlyPlayedScreen(
         MaterialTheme.colorScheme.surface
     )
 
-    val backgroundBrush = remember {
+    // Recompute the brush whenever the underlying colors change (theme switch, album palette
+    // change while a song is playing, dynamic color update). Previously this was wrapped in
+    // `remember {}` with no keys, so the brush captured the *first* bgColors reference and
+    // never updated — the dynamic album-art color engine was effectively defeated on this screen.
+    val backgroundBrush = remember(bgColors) {
         Brush.verticalGradient(
             colors = bgColors,
             endY = 1200f
