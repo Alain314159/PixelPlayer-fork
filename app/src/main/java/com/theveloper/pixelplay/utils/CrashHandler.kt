@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import java.io.PrintWriter
 import java.io.StringWriter
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -113,8 +112,11 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
         val exceptionMessage = prefs.getString(KEY_EXCEPTION_MESSAGE, "Unknown error") ?: "Unknown error"
         val stackTrace = prefs.getString(KEY_STACK_TRACE, "") ?: ""
 
-        val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-        val formattedDate = dateFormat.format(Date(timestamp))
+        // Use DateTimeFormatter (thread-safe) instead of SimpleDateFormat (not thread-safe).
+        val formattedDate = java.time.format.DateTimeFormatter
+            .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(java.time.Instant.ofEpochMilli(timestamp))
 
         return CrashLogData(
             timestamp = timestamp,
