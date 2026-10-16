@@ -53,6 +53,7 @@ import java.util.regex.Pattern
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.sin
+import timber.log.Timber
 
 // Roman Multilang
 object MultiLangRomanizer {
@@ -61,7 +62,7 @@ object MultiLangRomanizer {
             Thread.currentThread().contextClassLoader = MultiLangRomanizer::class.java.classLoader
             Tokenizer()
         } catch (e: Throwable) {
-            e.printStackTrace()
+            Timber.e(e)
             null
         }
     }
@@ -226,7 +227,7 @@ object MultiLangRomanizer {
                 .trim()
 
         } catch (e: Throwable) {
-            e.printStackTrace()
+            Timber.e(e)
             null
         }
     }
@@ -400,7 +401,7 @@ object MultiLangRomanizer {
 
             sb.toString().replace(Regex("""\s+"""), " ").trim()
         } catch (e: Throwable) {
-            e.printStackTrace()
+            Timber.e(e)
             null
         }
     }

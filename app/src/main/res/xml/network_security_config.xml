@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!--
+        Default: deny cleartext (HTTP) traffic. The previous configuration allowed cleartext
+        globally, which weakened HTTPS enforcement for the entire app even though
+        AndroidManifest sets android:usesCleartextTraffic="false".
+    -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!--
+        Allow cleartext only for the local Ktor HTTP servers used by the in-process
+        cloud stream proxies and the Cast transcoding server (MediaFileHttpServerService).
+        These always bind to 127.0.0.1 on a random port and never leave the device.
+    -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>

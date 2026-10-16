@@ -265,8 +265,16 @@
         <provider
             android:name=".data.provider.SharedArtworkContentProvider"
             android:authorities="${applicationId}.artwork"
-            android:exported="true"
+            android:exported="false"
             android:grantUriPermissions="true" />
+            <!--
+                BUG FIX (A4): previously this provider was exported="true" with no permission
+                guard, allowing any third-party app to read album artwork via
+                content://com.theveloper.pixelplay.artwork/song/<songId>. The provider is only
+                consumed by components in the same APK (widgets, Android Auto, Wear OS data
+                layer), so exported="false" is the correct setting. If a future feature requires
+                exposing artwork to other apps, add a signature-protected custom permission.
+            -->
 
         <!-- Wear OS Data Layer: receives playback/volume commands from the watch -->
         <service

@@ -132,11 +132,28 @@ android {
         }
 
         release {
+            // BUG FIX (A3): previously this fell back silently to signingConfigs.getByName("debug")
+            // when the release keystore was missing. That meant every developer who ran
+            // `:app:assembleRelease` without vz-pixelplay.jks on their machine got an APK signed
+            // with the well-known platform debug key — anyone with that key (every Android dev
+            // machine) could replace the app on a user's device. Now we fail the build loudly
+            // when the keystore is missing so this can never happen silently.
             val keystoreFile = file("$rootDir/vz-pixelplay.jks")
             signingConfig = if (keystoreFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                // For local dev convenience, allow an opt-in env var PIXELPLAYER_ALLOW_DEBUG_RELEASE=1
+                // to fall back to debug signing without breaking CI/release builds.
+                val allowDebug = (System.getenv("PIXELPLAYER_ALLOW_DEBUG_RELEASE") ?: "0") == "1"
+                if (allowDebug) {
+                    logger.warn("WARNING: signing release APK with debug key because PIXELPLAYER_ALLOW_DEBUG_RELEASE=1 and $keystoreFile is missing. Do NOT ship this APK.")
+                    signingConfigs.getByName("debug")
+                } else {
+                    throw GradleException(
+                        "Release keystore not found at $keystoreFile. " +
+                            "To build a release APK, place your keystore there (or set PIXELPLAYER_ALLOW_DEBUG_RELEASE=1 for local dev only)."
+                    )
+                }
             }
             isMinifyEnabled = true
             isShrinkResources = true

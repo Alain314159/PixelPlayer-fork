@@ -42,6 +42,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import timber.log.Timber
 
 data class PlaylistUiState(
     val playlists: List<Playlist> = emptyList(),
@@ -518,7 +519,7 @@ class PlaylistViewModel @Inject constructor(
 
                 file.absolutePath
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e)
                 null
             }
         }
