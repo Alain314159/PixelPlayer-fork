@@ -55,7 +55,16 @@ class QueueStateHolder @Inject constructor(
 ) {
 
     companion object {
-        private const val SHUFFLE_SAMPLE_LIMIT = 500
+        /**
+         * Upper bound on how many songs the "shuffle all" entry points pull from the
+         * repository. Libraries at or below this size get their entire catalogue in the
+         * queue. The bound only exists as a safety valve for extreme libraries: every
+         * queue item is serialized into the playback snapshot on each persist and shipped
+         * to session controllers, so an unbounded queue would make those proportional
+         * costs pathological. Queue construction itself already scales — shuffling yields
+         * cooperatively ([QueueUtils]) and media items attach in batches.
+         */
+        const val SHUFFLE_ALL_SONG_LIMIT = 10_000
         private const val ALL_SONGS_SHUFFLED_QUEUE = "All Songs (Shuffled)"
         private const val FAVORITES_SHUFFLED_QUEUE = "Liked Songs (Shuffled)"
     }
@@ -172,15 +181,16 @@ class QueueStateHolder @Inject constructor(
     /* -------------------------------------------------------------------------- */
 
     /**
-     * Shuffles a bounded random sample of the whole library. Loads songs straight from the
-     * repository instead of materializing the entire library in memory.
+     * Shuffles the whole library (bounded by [SHUFFLE_ALL_SONG_LIMIT] as a safety valve
+     * for extreme libraries). Loads songs straight from the repository instead of going
+     * through the in-memory library snapshot.
      */
     fun shuffleAll(
         queueName: String = ALL_SONGS_SHUFFLED_QUEUE,
         callbacks: ShufflePlaybackCallbacks
     ) {
         callbacks.scope.launch {
-            val randomSongs = musicRepository.getRandomSongs(limit = SHUFFLE_SAMPLE_LIMIT)
+            val randomSongs = musicRepository.getRandomSongs(limit = SHUFFLE_ALL_SONG_LIMIT)
             if (randomSongs.isNotEmpty()) {
                 callbacks.playShuffled(randomSongs, queueName)
             }

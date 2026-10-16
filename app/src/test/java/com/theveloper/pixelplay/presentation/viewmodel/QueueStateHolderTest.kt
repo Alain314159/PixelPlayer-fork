@@ -74,7 +74,7 @@ class QueueStateHolderTest {
     @Test
     fun `shuffleAll resolves a random sample and dispatches shuffled playback`() = runTest {
         val songs = listOf(song1, song2, song3)
-        coEvery { musicRepository.getRandomSongs(500) } returns songs
+        coEvery { musicRepository.getRandomSongs(QueueStateHolder.SHUFFLE_ALL_SONG_LIMIT) } returns songs
         val cb = CapturingShuffleCallbacks(this)
 
         holder().shuffleAll("All Songs (Shuffled)", cb.callbacks)
@@ -86,7 +86,7 @@ class QueueStateHolderTest {
 
     @Test
     fun `shuffleAll does not dispatch when the sample is empty`() = runTest {
-        coEvery { musicRepository.getRandomSongs(500) } returns emptyList()
+        coEvery { musicRepository.getRandomSongs(QueueStateHolder.SHUFFLE_ALL_SONG_LIMIT) } returns emptyList()
         val cb = CapturingShuffleCallbacks(this)
 
         holder().shuffleAll(callbacks = cb.callbacks)
@@ -98,7 +98,7 @@ class QueueStateHolderTest {
     @Test
     fun `playRandom dispatches the all-songs shuffled queue`() = runTest {
         val songs = listOf(song3, song1)
-        coEvery { musicRepository.getRandomSongs(500) } returns songs
+        coEvery { musicRepository.getRandomSongs(QueueStateHolder.SHUFFLE_ALL_SONG_LIMIT) } returns songs
         val cb = CapturingShuffleCallbacks(this)
 
         holder().playRandom(cb.callbacks)

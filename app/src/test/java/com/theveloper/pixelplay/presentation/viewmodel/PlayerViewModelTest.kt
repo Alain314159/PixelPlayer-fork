@@ -599,7 +599,7 @@ class PlayerViewModelTest {
             _allSongsFlow.value = songs.toImmutableList()
             // The tile pulls a bounded random sample from the repository; stub it so the
             // "already loaded" path returns immediately without going through a sync retry.
-            coEvery { mockMusicRepository.getRandomSongs(500) } returns songs
+            coEvery { mockMusicRepository.getRandomSongs(QueueStateHolder.SHUFFLE_ALL_SONG_LIMIT) } returns songs
             stubShuffledPlayback(songs, "All Songs (Shuffled)", startSong = song1)
 
             playerViewModel.triggerShuffleAllFromTile()
