@@ -36,6 +36,15 @@ object LyricsImportSecurity {
     const val MAX_TTML_FILE_BYTES = 1024 * 1024 // 1 MB
     const val MAX_LYRICS_TEXT_CHARS = 50_000
 
+    // XML payloads carrying DOCTYPE or ENTITY declarations are the entry point for
+    // XXE attacks (file:/// exfiltration, billion-laughs amplification). The TTML
+    // parser already rejects these via feature flags, but the LRC fallback path
+    // would otherwise accept the raw XML as plain lyrics. Reject pre-parse.
+    private val XML_DOCTYPE_OR_ENTITY_REGEX = Regex(
+        "<!(?:DOCTYPE|ENTITY)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
     private enum class LyricsDocumentFormat(
         val extension: String,
         val allowedMimeTypes: Set<String>
@@ -172,9 +181,23 @@ object LyricsImportSecurity {
         val decoded = decodeText(payload)
             ?: return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.INVALID_ENCODING)
 
+        if (XML_DOCTYPE_OR_ENTITY_REGEX.containsMatchIn(decoded.take(8 * 1024))) {
+            return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.INVALID_LYRICS_CONTENT)
+        }
+
         for (normalized in normalizationCandidates(decoded, format)) {
             val validation = validateImportedLrcContent(normalized)
             if (validation is LyricsImportValidationResult.Valid) {
+                // .lrc documents must carry at least one synced line. Plain
+                // text that parses as unsynced lyrics does not satisfy the
+                // LRC contract; keep trying sibling normalization candidates
+                // (e.g., a TTML-to-enhanced-LRC fallback) that may produce
+                // a synced result.
+                if (format == LyricsDocumentFormat.LRC &&
+                    validation.value.parsedLyrics.synced.isNullOrEmpty()
+                ) {
+                    continue
+                }
                 return validation
             }
         }

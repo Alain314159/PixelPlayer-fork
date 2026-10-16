@@ -111,6 +111,14 @@ class MediaFileHttpServerService : Service() {
     private val signatureMimeCache = java.util.Collections.synchronizedMap(mutableMapOf<String, String?>())
     // Cache for the actual codec info (codec MIME, sample rate, channels) to avoid re-probing.
     private val codecInfoCache = java.util.Collections.synchronizedMap(mutableMapOf<String, AudioCodecInfo?>())
+    // ConcurrentHashMap so parallel Cast HEAD/GET probes for the same song
+    // cannot corrupt the cache structure (mutableMapOf is HashMap-backed and
+    // not safe under concurrent resize). Null values are not supported by
+    // ConcurrentHashMap so we wrap sentinel results.
+    private val signatureMimeCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val signatureMimeNegativeCache = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val codecInfoCache = java.util.concurrent.ConcurrentHashMap<String, AudioCodecInfo>()
+    private val codecInfoNegativeCache = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val httpDateFormatter: DateTimeFormatter =
         DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC)
 
@@ -384,7 +392,10 @@ class MediaFileHttpServerService : Service() {
                 lastFailureReason = null
                 lastFailureMessage = null
 
-                server = embeddedServer(CIO, port = serverPort, host = "0.0.0.0") {
+                // Bind explicitly to the selected LAN interface instead of 0.0.0.0
+                // so the server is not reachable on other interfaces (tethering
+                // hotspot, VPN, etc.) that may carry untrusted clients.
+                server = embeddedServer(CIO, port = serverPort, host = addressSelection.hostAddress) {
                     routing {
                             get("/health") {
                                 if (!call.ensureLoopbackHealthRequest()) return@get
@@ -1445,8 +1456,9 @@ class MediaFileHttpServerService : Service() {
 
     private fun detectAudioMimeTypeBySignature(song: Song, uri: Uri): String? {
         signatureMimeCache[song.id]?.let { return it }
+        if (song.id in signatureMimeNegativeCache) return null
         val bytes = readAudioSignature(song = song, uri = uri) ?: run {
-            signatureMimeCache[song.id] = null
+            signatureMimeNegativeCache.add(song.id)
             return null
         }
 
@@ -1455,7 +1467,11 @@ class MediaFileHttpServerService : Service() {
             ?: detectMimeAtOffset(bytes, 0)
             ?: detectFramedAudioMime(bytes, id3PayloadOffset)
             ?: detectFramedAudioMime(bytes, 0)
-        signatureMimeCache[song.id] = detected
+        if (detected != null) {
+            signatureMimeCache[song.id] = detected
+        } else {
+            signatureMimeNegativeCache.add(song.id)
+        }
         return detected
     }
 
@@ -1486,98 +1502,14 @@ class MediaFileHttpServerService : Service() {
         }.getOrNull()
     }
 
-    private fun parseId3PayloadOffset(bytes: ByteArray): Int {
-        if (bytes.size < 10) return 0
-        if (bytes[0] != 'I'.code.toByte() || bytes[1] != 'D'.code.toByte() || bytes[2] != '3'.code.toByte()) {
-            return 0
-        }
-        val flags = bytes[5].toInt() and 0xFF
-        val hasFooter = (flags and 0x10) != 0
-        val tagSize = ((bytes[6].toInt() and 0x7F) shl 21) or
-            ((bytes[7].toInt() and 0x7F) shl 14) or
-            ((bytes[8].toInt() and 0x7F) shl 7) or
-            (bytes[9].toInt() and 0x7F)
-        val totalTagBytes = 10 + tagSize + if (hasFooter) 10 else 0
-        return totalTagBytes.coerceIn(0, bytes.size)
-    }
+    private fun parseId3PayloadOffset(bytes: ByteArray): Int =
+        AudioSignatureDetection.parseId3PayloadOffset(bytes)
 
-    private fun detectMimeAtOffset(bytes: ByteArray, offset: Int): String? {
-        if (offset < 0 || offset >= bytes.size) return null
-        val remaining = bytes.size - offset
-        if (remaining >= 4 &&
-            bytes[offset] == 'f'.code.toByte() &&
-            bytes[offset + 1] == 'L'.code.toByte() &&
-            bytes[offset + 2] == 'a'.code.toByte() &&
-            bytes[offset + 3] == 'C'.code.toByte()
-        ) {
-            return "audio/flac"
-        }
-        if (remaining >= 4 &&
-            bytes[offset] == 'O'.code.toByte() &&
-            bytes[offset + 1] == 'g'.code.toByte() &&
-            bytes[offset + 2] == 'g'.code.toByte() &&
-            bytes[offset + 3] == 'S'.code.toByte()
-        ) {
-            return "audio/ogg"
-        }
-        if (remaining >= 12 &&
-            bytes[offset] == 'R'.code.toByte() &&
-            bytes[offset + 1] == 'I'.code.toByte() &&
-            bytes[offset + 2] == 'F'.code.toByte() &&
-            bytes[offset + 3] == 'F'.code.toByte() &&
-            bytes[offset + 8] == 'W'.code.toByte() &&
-            bytes[offset + 9] == 'A'.code.toByte() &&
-            bytes[offset + 10] == 'V'.code.toByte() &&
-            bytes[offset + 11] == 'E'.code.toByte()
-        ) {
-            return "audio/wav"
-        }
-        if (remaining >= 12 &&
-            bytes[offset] == 'F'.code.toByte() &&
-            bytes[offset + 1] == 'O'.code.toByte() &&
-            bytes[offset + 2] == 'R'.code.toByte() &&
-            bytes[offset + 3] == 'M'.code.toByte() &&
-            bytes[offset + 8] == 'A'.code.toByte() &&
-            bytes[offset + 9] == 'I'.code.toByte() &&
-            bytes[offset + 10] == 'F'.code.toByte() &&
-            bytes[offset + 11] == 'F'.code.toByte()
-        ) {
-            return "audio/aiff"
-        }
-        // ISO Base Media File Format (MP4/M4A/M4B): check for 'ftyp' box at bytes 4-7.
-        // Requires at least offset+8 bytes to safely access offset+4..offset+7.
-        if (remaining >= 12 && offset + 8 <= bytes.size &&
-            bytes[offset + 4] == 'f'.code.toByte() &&
-            bytes[offset + 5] == 't'.code.toByte() &&
-            bytes[offset + 6] == 'y'.code.toByte() &&
-            bytes[offset + 7] == 'p'.code.toByte()
-        ) {
-            return "audio/mp4"
-        }
-        if (remaining >= 4 &&
-            bytes[offset] == 'A'.code.toByte() &&
-            bytes[offset + 1] == 'D'.code.toByte() &&
-            bytes[offset + 2] == 'I'.code.toByte() &&
-            bytes[offset + 3] == 'F'.code.toByte()
-        ) {
-            return "audio/aac"
-        }
-        return null
-    }
+    private fun detectMimeAtOffset(bytes: ByteArray, offset: Int): String? =
+        AudioSignatureDetection.detectMimeAtOffset(bytes, offset)
 
-    private fun detectFramedAudioMime(bytes: ByteArray, startOffset: Int): String? {
-        if (bytes.size < 2) return null
-        val start = startOffset.coerceIn(0, bytes.lastIndex)
-        for (index in start until bytes.size - 1) {
-            val b0 = bytes[index].toInt() and 0xFF
-            val b1 = bytes[index + 1].toInt() and 0xFF
-            if (b0 != 0xFF || (b1 and 0xF0) != 0xF0) continue
-            val layerBits = (b1 ushr 1) and 0x03
-            if (layerBits == 0) return "audio/aac"
-            if (layerBits in 1..3) return "audio/mpeg"
-        }
-        return null
-    }
+    private fun detectFramedAudioMime(bytes: ByteArray, startOffset: Int): String? =
+        AudioSignatureDetection.detectFramedAudioMime(bytes, startOffset)
 
     private fun resolveAudioContentType(mimeType: String?): ContentType {
         val normalized = mimeType
@@ -1789,7 +1721,8 @@ class MediaFileHttpServerService : Service() {
      * Results are cached to avoid repeated MediaExtractor operations per song.
      */
     private fun detectAudioCodecViaExtractor(song: Song, uri: Uri): AudioCodecInfo? {
-        if (codecInfoCache.contains(song.id)) return codecInfoCache[song.id]
+        codecInfoCache[song.id]?.let { return it }
+        if (song.id in codecInfoNegativeCache) return null
         val extractor = MediaExtractor()
         val result = runCatching {
             val opened = runCatching {
@@ -1863,7 +1796,11 @@ class MediaFileHttpServerService : Service() {
             }
             null
         }.getOrNull().also { runCatching { extractor.release() } }
-        codecInfoCache[song.id] = result
+        if (result != null) {
+            codecInfoCache[song.id] = result
+        } else {
+            codecInfoNegativeCache.add(song.id)
+        }
         return result
     }
 
@@ -1925,6 +1862,14 @@ class MediaFileHttpServerService : Service() {
             if (isNonInitialRangeRequest(rangeHeader)) {
                 respondWhenTranscodeCompletes(
                     entry = existing,
+            // Bound the wait so a hung transcode cannot park multiple
+            // pending-Cast-client coroutines for ten minutes each. 2 minutes
+            // is plenty for any realistic track length.
+            withContext(Dispatchers.IO) {
+                existing.latch.await(2, TimeUnit.MINUTES)
+            }
+            if (existing.done && !existing.failed && existing.tempFile.exists()) {
+                respondWithAudioStream(
                     contentType = aacContentType,
                     rangeHeader = rangeHeader
                 )
@@ -1985,6 +1930,22 @@ class MediaFileHttpServerService : Service() {
                 contentType = aacContentType,
                 rangeHeader = rangeHeader
             )
+            // Wait for completion. Bound to 2 minutes per song — even very
+            // long FLAC tracks transcode in well under a minute on modern
+            // hardware, and the original 10-minute ceiling let a hung
+            // transcode park an IO worker for ten minutes per pending client.
+            withContext(Dispatchers.IO) {
+                entry.latch.await(2, TimeUnit.MINUTES)
+            }
+            if (entry.done && tempFile.exists()) {
+                respondWithAudioStream(
+                    contentType = aacContentType,
+                    fileSize = tempFile.length(),
+                    rangeHeader = rangeHeader
+                ) { FileInputStream(tempFile) }
+            } else {
+                respond(HttpStatusCode.InternalServerError, "Transcode failed")
+            }
             return
         }
 

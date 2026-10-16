@@ -150,6 +150,15 @@ class DailyMixStateHolder @Inject constructor(
                 todayCal.get(Calendar.DAY_OF_YEAR) != lastCal.get(Calendar.DAY_OF_YEAR)
 
             if (isDifferentDay) {
+            // LocalDate compares full year+month+day, so the Dec 31 → Jan 1
+            // crossover (which DAY_OF_YEAR mis-handles by chance, since
+            // 365 != 1) and any DST gap are handled correctly.
+            val zone = java.time.ZoneId.systemDefault()
+            val today = java.time.LocalDate.now(zone)
+            val lastUpdateDate = java.time.Instant.ofEpochMilli(lastUpdate)
+                .atZone(zone).toLocalDate()
+
+            if (today != lastUpdateDate) {
                 updateDailyMix(favoriteSongIdsFlow)
                 userPreferencesRepository.saveLastDailyMixUpdateTimestamp(System.currentTimeMillis())
             }

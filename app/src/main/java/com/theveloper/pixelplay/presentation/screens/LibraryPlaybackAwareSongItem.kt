@@ -3,21 +3,21 @@ package com.theveloper.pixelplay.presentation.screens
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
-import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 
+/**
+ * Lightweight playback projection shared by every song item in a list. Parent
+ * tabs collect this once from PlayerViewModel and pass the same instance down
+ * to every item, so a list of 100 items causes one upstream subscription
+ * instead of 100 N×N collectors.
+ */
 @Immutable
-internal data class LibrarySongPlaybackUiState(
-    val isCurrentSong: Boolean = false,
+internal data class LibraryPlaybackHints(
+    val currentSongId: String? = null,
     val isPlaying: Boolean = false
 )
 
@@ -25,7 +25,7 @@ internal data class LibrarySongPlaybackUiState(
 @Composable
 internal fun LibraryPlaybackAwareSongItem(
     song: Song,
-    playerViewModel: PlayerViewModel,
+    playbackHints: LibraryPlaybackHints,
     albumArtSize: Dp = 50.dp,
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
@@ -49,10 +49,11 @@ internal fun LibraryPlaybackAwareSongItem(
     val playerConfig by playerViewModel.playerConfigSlice.collectAsStateWithLifecycle()
     val reduceAnimations = playerConfig.reduceAnimations
 
+    val isCurrentSong = playbackHints.currentSongId == song.id
     EnhancedSongListItem(
         song = song,
-        isPlaying = playbackUiState.isPlaying,
-        isCurrentSong = playbackUiState.isCurrentSong,
+        isPlaying = isCurrentSong && playbackHints.isPlaying,
+        isCurrentSong = isCurrentSong,
         isLoading = false,
         albumArtSize = albumArtSize,
         isSelected = isSelected,

@@ -4,6 +4,21 @@ package com.theveloper.pixelplay.presentation.screens
 
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
+import com.theveloper.pixelplay.presentation.screens.library.CompactLibraryPagerIndicator
+import com.theveloper.pixelplay.presentation.screens.library.FolderListItem
+import com.theveloper.pixelplay.presentation.screens.library.FolderPlaylistItem
+import com.theveloper.pixelplay.presentation.screens.library.AlbumGridItemRedesigned
+import com.theveloper.pixelplay.presentation.screens.library.AlbumListItem
+import com.theveloper.pixelplay.presentation.screens.library.ArtistListItem
+import com.theveloper.pixelplay.presentation.screens.library.LibraryTabGridItem
+import com.theveloper.pixelplay.presentation.screens.library.displayTitle
+import com.theveloper.pixelplay.presentation.screens.library.iconRes
+import com.theveloper.pixelplay.presentation.screens.library.flattenFolders
+import com.theveloper.pixelplay.presentation.screens.library.sortMusicFoldersByOption
+import com.theveloper.pixelplay.presentation.screens.library.sortSongsForFolderView
+import com.theveloper.pixelplay.presentation.screens.library.LibraryInlineSyncIndicator
+import com.theveloper.pixelplay.presentation.screens.library.LibrarySyncOverlay
+import com.theveloper.pixelplay.presentation.screens.library.WatchTransferProgressDialog
 
 import android.os.Trace
 import android.text.format.Formatter
@@ -207,6 +222,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -384,6 +400,9 @@ private fun WatchTransferProgressDialog(
         }
     }
 }
+// WatchTransferProgressDialog moved to presentation/screens/library/
+// WatchTransferProgressDialog.kt as the first step of the LibraryScreen
+// decomposition. Imported below.
 
 private data class LibraryScreenPlayerProjection(
     val currentFolder: MusicFolder? = null,
@@ -468,10 +487,14 @@ fun LibraryScreen(
     val compactInitialPage = remember(tabCount, normalizedLastTabIndex) {
         infinitePagerInitialPage(tabCount, normalizedLastTabIndex)
     }
-    val pagerState = if (isCompactNavigation) {
-        rememberPagerState(initialPage = compactInitialPage) { Int.MAX_VALUE }
-    } else {
-        rememberPagerState(initialPage = normalizedLastTabIndex) { tabCount }
+    // Single rememberPagerState call instead of a conditional remember anti-pattern
+    // (the previous if/else allocated separate slots on each branch and lost scroll
+    // state when libraryNavigationMode toggled between COMPACT_PILL and the full
+    // tab strip). initialPage is captured once; pageCount is a lambda that re-reads
+    // the mode on every measure pass.
+    val pagerInitialPage = if (isCompactNavigation) compactInitialPage else normalizedLastTabIndex
+    val pagerState = rememberPagerState(initialPage = pagerInitialPage) {
+        if (isCompactNavigation) Int.MAX_VALUE else tabCount
     }
     val currentTabIndex by remember(pagerState, tabTitles, isCompactNavigation) {
         derivedStateOf {
@@ -544,6 +567,14 @@ fun LibraryScreen(
 
     val onSongSelectionToggle: (Song) -> Unit = remember(multiSelectionState) {
         { song -> multiSelectionState.toggleSelection(song) }
+    }
+
+    // Bound method reference hoisted via remember so it is referentially stable
+    // across recompositions. Without this, each render passes a fresh lambda
+    // identity into LibrarySongsTab / LibraryFavoritesTab / LibraryFoldersTab,
+    // breaking parameter stability on those composables.
+    val getSelectionIndex: (String) -> Int? = remember(multiSelectionState) {
+        multiSelectionState::getSelectionIndex
     }
 
     val toggleAlbumSelection: (Album) -> Unit = remember(selectedAlbums, playerViewModel, context) {
@@ -817,17 +848,21 @@ fun LibraryScreen(
         }
     }
 
-    val gradientColorsDark = listOf(
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-        Color.Transparent
-    ).toImmutableList()
-
-    val gradientColorsLight = listOf(
-        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
-        Color.Transparent
-    ).toImmutableList()
-
-    val gradientColors = if (dm) gradientColorsDark else gradientColorsLight
+    val gradientPrimary = MaterialTheme.colorScheme.primaryContainer
+    val gradientOnPrimary = MaterialTheme.colorScheme.onPrimaryContainer
+    val gradientColors = remember(dm, gradientPrimary, gradientOnPrimary) {
+        if (dm) {
+            persistentListOf(
+                gradientPrimary.copy(alpha = 0.5f),
+                Color.Transparent
+            )
+        } else {
+            persistentListOf(
+                gradientOnPrimary.copy(alpha = 0.2f),
+                Color.Transparent
+            )
+        }
+    }
 
     val gradientBrush = remember(gradientColors) {
         Brush.verticalGradient(colors = gradientColors)
@@ -1528,7 +1563,7 @@ fun LibraryScreen(
                                             selectedSongIds = selectedSongIds,
                                             onSongLongPress = onSongLongPress,
                                             onSongSelectionToggle = onSongSelectionToggle,
-                                            getSelectionIndex = playerViewModel.multiSelectionStateHolder::getSelectionIndex,
+                                            getSelectionIndex = getSelectionIndex,
                                             onLocateCurrentSongVisibilityChanged = { songsShowLocateButton = it },
                                             onRegisterLocateCurrentSongAction = { songsLocateAction = it },
                                             sortOption = playerUiState.currentSongSortOption,
@@ -1623,7 +1658,7 @@ fun LibraryScreen(
                                             selectedSongIds = selectedSongIds,
                                             onSongLongPress = onSongLongPress,
                                             onSongSelectionToggle = onSongSelectionToggle,
-                                            getSelectionIndex = playerViewModel.multiSelectionStateHolder::getSelectionIndex,
+                                            getSelectionIndex = getSelectionIndex,
                                             sortOption = playerUiState.currentFavoriteSortOption,
                                             onLocateCurrentSongVisibilityChanged = { likedShowLocateButton = it },
                                             onRegisterLocateCurrentSongAction = { likedLocateAction = it },
@@ -1671,7 +1706,7 @@ fun LibraryScreen(
                                             selectedSongIds = selectedSongIds,
                                             onSongLongPress = onSongLongPress,
                                             onSongSelectionToggle = onSongSelectionToggle,
-                                            getSelectionIndex = playerViewModel.multiSelectionStateHolder::getSelectionIndex,
+                                            getSelectionIndex = getSelectionIndex,
                                             onLocateCurrentSongVisibilityChanged = { foldersShowLocateButton = it },
                                             onRegisterLocateCurrentSongAction = { foldersLocateAction = it },
                                             pendingLocatePath = pendingFoldersLocatePath,
@@ -2325,6 +2360,9 @@ private fun LibrarySyncOverlay(syncManager: com.theveloper.pixelplay.data.worker
         }
     }
 }
+// CompactLibraryPagerIndicator, LibraryInlineSyncIndicator, and
+// LibrarySyncOverlay moved to presentation/screens/library/LibrarySyncIndicators.kt
+// as part of the LibraryScreen decomposition.
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -2710,16 +2748,7 @@ private fun LibraryTabSwitcherSheet(
     }
 }
 
-@Composable
-private fun LibraryTabGridItem(
-    tabId: LibraryTabId,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape(20.dp)
-    val containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
-    val iconContainer = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
-    val textColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+// LibraryTabGridItem moved to presentation/screens/library/LibraryTabGridItem.kt.
 
     Surface(
         modifier = Modifier
@@ -2762,6 +2791,8 @@ private fun LibraryTabGridItem(
 }
 
 private fun positiveMod(value: Int, mod: Int): Int {
+// Exposed to the library/ subpackage during the LibraryScreen decomposition.
+internal fun positiveMod(value: Int, mod: Int): Int {
     if (mod <= 0) return 0
     return ((value % mod) + mod) % mod
 }
@@ -2809,6 +2840,8 @@ private fun LibraryTabId.iconRes(): Int = when (this) {
 
 @Composable
 private fun LibraryTabId.displayTitle(): String = stringResource(titleRes)
+// LibraryTabId.iconRes() and displayTitle() moved to
+// presentation/screens/library/LibraryTabGridItem.kt (internal extensions).
 
 internal fun resolveFolderNavigationDirection(initialPath: String?, targetPath: String?): Int =
     when {
@@ -2892,13 +2925,17 @@ fun LibraryFoldersTab(
         val isRoot = targetPath == FOLDER_NAVIGATION_ROOT_KEY
         val activeFolder = if (isRoot) null else currentFolder
         val showPlaylistCards = playlistMode && activeFolder == null
-        val itemsToShow = remember(activeFolder, folders, flattenedFolders, currentSortOption) {
+        // .toImmutableList() runs inside the remember block so it doesn't
+        // re-allocate the persistent list on every recomposition. showPlaylistCards
+        // is added to the key list because it factors playlistMode in, which the
+        // previous key set was missing.
+        val itemsToShow = remember(showPlaylistCards, activeFolder, folders, flattenedFolders, currentSortOption) {
             when {
                 showPlaylistCards -> flattenedFolders
                 activeFolder != null -> sortMusicFoldersByOption(activeFolder.subFolders, currentSortOption)
                 else -> sortMusicFoldersByOption(folders, currentSortOption)
-            }
-        }.toImmutableList()
+            }.toImmutableList()
+        }
 
         val songsToShow = remember(activeFolder, currentSortOption) {
             sortSongsForFolderView(activeFolder?.songs ?: emptyList(), currentSortOption)
@@ -2909,6 +2946,9 @@ fun LibraryFoldersTab(
                 .distinctUntilChanged()
         }.collectAsStateWithLifecycle(initialValue = null)
 
+            sortSongsForFolderView(activeFolder?.songs ?: emptyList(), currentSortOption).toImmutableList()
+        }
+        val currentSong = stablePlayerState.currentSong
         val currentSongId = currentSong?.id
         val currentSongIndexInSongs = remember(songsToShow, currentSongId) {
             currentSongId?.let { songId -> songsToShow.indexOfFirst { it.id == songId } } ?: -1
@@ -3133,25 +3173,12 @@ fun LibraryFoldersTab(
     }
 }
 
-@Composable
-fun FolderPlaylistItem(folder: MusicFolder, onClick: () -> Unit) {
-    val previewSongs = remember(folder) { folder.collectAllSongs().take(9) }
+// FolderPlaylistItem and FolderListItem moved to
+// presentation/screens/library/FolderItems.kt.
 
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PlaylistArtCollage(
-                songs = previewSongs,
-                modifier = Modifier.size(48.dp)
-            )
+// flattenFolders, sortMusicFoldersByOption, sortSongsForFolderView moved to
+// presentation/screens/library/FolderSortHelpers.kt — pure functions, now
+// JVM-testable.
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -3261,24 +3288,12 @@ private fun sortSongsForFolderView(songs: List<Song>, sortOption: SortOption): L
 }
 
 private fun MusicFolder.collectAllSongs(): List<Song> {
+internal fun MusicFolder.collectAllSongs(): List<Song> {
     return songs + subFolders.flatMap { it.collectAllSongs() }
 }
+// AlbumGridItemRedesigned moved to presentation/screens/library/AlbumGridItemRedesigned.kt
 
-@androidx.annotation.OptIn(UnstableApi::class)
-@Composable
-fun AlbumGridItemRedesigned(
-    album: Album,
-    albumColorSchemePairFlow: StateFlow<ColorSchemePair?>,
-    onClick: () -> Unit,
-    isLoading: Boolean = false,
-    isSelectionMode: Boolean = false,
-    isSelected: Boolean = false,
-    selectionIndex: Int? = null,
-    onLongPress: () -> Unit = {},
-    onSelectionToggle: () -> Unit = {}
-) {
-    val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
-    val systemIsDark = LocalPixelPlayDarkTheme.current
+// ArtistListItem moved to presentation/screens/library/ArtistListItem.kt
 
     // 1. Obtén el colorScheme del tema actual aquí, en el scope Composable.
     val currentMaterialColorScheme = MaterialTheme.colorScheme
@@ -3758,3 +3773,4 @@ fun AlbumListItem(
         }
     }
 }
+// AlbumListItem moved to presentation/screens/library/AlbumListItem.kt

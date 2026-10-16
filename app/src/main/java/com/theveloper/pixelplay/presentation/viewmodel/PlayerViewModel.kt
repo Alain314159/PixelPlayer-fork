@@ -85,6 +85,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -175,6 +178,39 @@ private data class SortOptionsSnapshot(
     val artistSort: SortOption,
     val folderSort: SortOption,
     val favoriteSort: SortOption,
+)
+
+private data class PreparedPlaybackQueue(
+    val mediaItems: List<MediaItem>,
+    val startIndex: Int
+)
+
+private data class PendingMetadataEdit(
+    val song: Song,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val albumArtist: String,
+    val composer: String,
+    val genre: String,
+    val lyrics: String,
+    val trackNumber: Int,
+    val discNumber: Int?,
+    val replayGainTrackGainDb: String?,
+    val replayGainAlbumGainDb: String?,
+    val coverArtUpdate: CoverArtUpdate?
+)
+
+private data class PendingLyricsSave(
+    val song: Song,
+    val lyrics: Lyrics,
+    val preferSynced: Boolean
+)
+
+private data class ResolvedAlbumSelection(
+    val albums: List<Album>,
+    val songs: List<Song>,
+    val wasTrimmed: Boolean
 )
 
 @UnstableApi
@@ -372,15 +408,19 @@ class PlayerViewModel @Inject constructor(
             // 1. Invalidate Coil cache for the BASE uri (without params)
             // This ensures next time we load it without params, it's fresh too.
             val baseUri = currentUriClean
-            
-            // Remove from Memory Cache
-            context.imageLoader.memoryCache?.keys?.forEach { key ->
+            // Hoist the imageLoader lookup once. Snapshot keys to a Set first
+            // — Coil's memoryCache.keys is mutated by remove() and historically
+            // wasn't safe to mutate while iterating directly.
+            val imageLoader = context.imageLoader
+            val memoryCache = imageLoader.memoryCache
+            val keySnapshot = memoryCache?.keys?.toSet().orEmpty()
+            keySnapshot.forEach { key ->
                 if (key.toString().contains(baseUri)) {
-                    context.imageLoader.memoryCache?.remove(key)
+                    memoryCache?.remove(key)
                 }
             }
             // Remove from Disk Cache
-            context.imageLoader.diskCache?.remove(baseUri)
+            imageLoader.diskCache?.remove(baseUri)
 
             // 2. Extract Colors (using base URI)
             themeStateHolder.extractAndGenerateColorScheme(updatedArtUri.toUri(), updatedArtUri, isPreload = false)
@@ -404,15 +444,15 @@ class PlayerViewModel @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val currentSongArtists: StateFlow<List<Artist>> = stablePlayerState
+    val currentSongArtists: StateFlow<ImmutableList<Artist>> = stablePlayerState
         .map { it.currentSong?.id }
         .distinctUntilChanged()
         .flatMapLatest { songId ->
             val idLong = songId?.toLongOrNull()
-            if (idLong == null) flowOf(emptyList())
-            else musicRepository.getArtistsForSong(idLong)
+            if (idLong == null) flowOf(persistentListOf())
+            else musicRepository.getArtistsForSong(idLong).map { it.toImmutableList() }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentListOf())
 
     private val _sheetState = MutableStateFlow(PlayerSheetState.COLLAPSED)
     val sheetState: StateFlow<PlayerSheetState> = _sheetState.asStateFlow()
@@ -535,14 +575,13 @@ class PlayerViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = false
     )
+    // The 9-arg combine over per-provider API-key flows moved into
+    // AiStateHolder.hasActiveAiProviderApiKey; this is a thin pass-through so
+    // existing call sites in screens continue to work.
+    val hasActiveAiProviderApiKey: StateFlow<Boolean> = aiStateHolder.hasActiveAiProviderApiKey
 
-    val hasGeminiApiKey: StateFlow<Boolean> = aiPreferencesRepository.geminiApiKey
-        .map { it.isNotBlank() }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = false
-        )
+    // Moved to AiStateHolder.hasGeminiApiKey; thin pass-through.
+    val hasGeminiApiKey: StateFlow<Boolean> = aiStateHolder.hasGeminiApiKey
 
     val fullPlayerLoadingTweaks: StateFlow<FullPlayerLoadingTweaks> = userPreferencesRepository.fullPlayerLoadingTweaksFlow
         .stateIn(
@@ -1241,7 +1280,7 @@ class PlayerViewModel @Inject constructor(
     // composable. Now a single collect + distinctUntilChanged batches all settings.
     // ---------------------------------------------------------------------------
     data class FullPlayerSlice(
-        val currentSongArtists: List<Artist> = emptyList(),
+        val currentSongArtists: ImmutableList<Artist> = persistentListOf(),
         val lyricsSyncOffset: Int = 0,
         val albumArtQuality: AlbumArtQuality = AlbumArtQuality.MEDIUM,
         val audioMetadata: PlaybackAudioMetadata = PlaybackAudioMetadata(),
@@ -1262,7 +1301,7 @@ class PlayerViewModel @Inject constructor(
         albumArtQuality,
         playbackAudioMetadata,
         showPlayerFileInfo
-    ) { artists: List<Artist>, syncOffset: Int, artQuality: AlbumArtQuality,
+    ) { artists: ImmutableList<Artist>, syncOffset: Int, artQuality: AlbumArtQuality,
         audioMeta: PlaybackAudioMetadata, showFileInfo: Boolean ->
         FullPlayerSlicePart1(artists, syncOffset, artQuality, audioMeta, showFileInfo)
     }
@@ -1287,7 +1326,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private data class FullPlayerSlicePart1(
-        val currentSongArtists: List<Artist>,
+        val currentSongArtists: ImmutableList<Artist>,
         val lyricsSyncOffset: Int,
         val albumArtQuality: AlbumArtQuality,
         val audioMetadata: PlaybackAudioMetadata,
@@ -1417,14 +1456,40 @@ class PlayerViewModel @Inject constructor(
      * Observes a song by ID from Room DB, combined with the latest favorite status.
      * Uses direct Room query instead of scanning the full in-memory list.
      */
+    /**
+     * Per-songId cache so a screen that recomposes (and re-derives its
+     * `observeSong(currentSong.id)`) doesn't subscribe a brand-new Room
+     * collector on every recomposition. Once a screen drops the flow,
+     * SharingStarted.WhileSubscribed(5000) tears the upstream down.
+     *
+     * Caching is bounded — we trim the oldest entry when the map gets too
+     * large to avoid an unbounded Singleton-lifetime growth on a long
+     * session where the user browses many songs.
+     */
+    private val observedSongFlows = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, kotlinx.coroutines.flow.SharedFlow<Song?>>(32, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, kotlinx.coroutines.flow.SharedFlow<Song?>>?
+            ): Boolean = size > 64
+        }
+    )
+
     fun observeSong(songId: String?): Flow<Song?> {
         if (songId == null) return flowOf(null)
-        return combine(
+        observedSongFlows[songId]?.let { return it }
+        val shared = combine(
             musicRepository.getSong(songId),
             favoriteSongIds
         ) { song, favorites ->
             song?.copy(isFavorite = favorites.contains(songId))
         }.distinctUntilChanged()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000L),
+                initialValue = null
+            )
+        observedSongFlows[songId] = shared
+        return shared
     }
 
 
@@ -1448,6 +1513,25 @@ class PlayerViewModel @Inject constructor(
      * not depend on the eager in-memory song cache being populated first.
      */
     fun triggerShuffleAllFromTile() = playbackDispatchStateHolder.triggerShuffleAllFromTile()
+    fun triggerShuffleAllFromTile() {
+        Timber.d("[TileDebug] triggerShuffleAllFromTile called. mediaController=${mediaController != null}")
+        val action: () -> Unit = {
+            Timber.d("[TileDebug] action() invoked")
+            viewModelScope.launch {
+                // Prefer the in-memory library snapshot if it's already loaded
+                // (warm start, tile launched from the lock screen / shortcut
+                // after the app has been used at least once). Falling back to
+                // a bounded repository sample only on cold start avoids an
+                // unnecessary DB round-trip in the warm path.
+                val cachedSongs = libraryStateHolder.allSongs.value
+                var songs: List<Song> = if (cachedSongs.isNotEmpty()) {
+                    Timber.d("[TileDebug] Using ${cachedSongs.size} cached songs from library snapshot")
+                    cachedSongs
+                } else {
+                    val sample = musicRepository.getRandomSongs(limit = 500)
+                    Timber.d("[TileDebug] Repository returned ${sample.size} random songs immediately")
+                    sample
+                }
 
     fun playRandomSong() =
         queueStateHolder.playRandom(shufflePlaybackCallbacks())
@@ -1848,6 +1932,17 @@ class PlayerViewModel @Inject constructor(
                         aiStatus = snapshot.aiStatus,
                         aiError = snapshot.aiError
                     )
+        // Mirror AiStateHolder.isGeneratingMetadata into PlayerUiState. The
+        // previous 5-arg combine projected 4 fields that PlayerUiState doesn't
+        // even carry — pure waste. Screens that need showAiPlaylistSheet /
+        // aiStatus / aiError already consume the AiStateHolder pass-throughs
+        // exposed directly on this ViewModel.
+        viewModelScope.launch {
+            // StateFlow already dedupes via SharingStarted — no
+            // distinctUntilChanged needed.
+            aiStateHolder.isGeneratingMetadata.collect { generatingMetadata ->
+                _playerUiState.update {
+                    it.copy(isGeneratingAiMetadata = generatingMetadata)
                 }
             }
         }
@@ -2783,14 +2878,20 @@ class PlayerViewModel @Inject constructor(
         val albumsToProcess = albums.take(MAX_ALBUM_BATCH_SELECTION)
         val wasTrimmed = albums.size > albumsToProcess.size
 
+        // Fetch the songs for each album in parallel — six sequential Room
+        // queries on Dispatchers.IO was wall-clock-bound by the slowest disk
+        // read; async/awaitAll lets them overlap.
         val songs = withContext(Dispatchers.IO) {
-            buildList {
-                albumsToProcess.forEach { album ->
-                    val albumSongs = musicRepository.getSongsForAlbum(album.id).first()
-                    if (albumSongs.isNotEmpty()) {
-                        addAll(sortSongsForAlbumSelection(albumSongs))
+            coroutineScope {
+                albumsToProcess
+                    .map { album ->
+                        async { musicRepository.getSongsForAlbum(album.id).first() }
                     }
-                }
+                    .awaitAll()
+                    .flatMap { albumSongs ->
+                        if (albumSongs.isEmpty()) emptyList()
+                        else sortSongsForAlbumSelection(albumSongs)
+                    }
             }
         }
 
@@ -3077,6 +3178,14 @@ class PlayerViewModel @Inject constructor(
 
     fun refreshCastRoutes() {
         castRouteStateHolder.refreshCastRoutes(viewModelScope)
+    }
+
+    fun acquireMulticastLock() {
+        castStateHolder.acquireMulticastLock()
+    }
+
+    fun releaseMulticastLock() {
+        castStateHolder.releaseMulticastLock()
     }
 
 

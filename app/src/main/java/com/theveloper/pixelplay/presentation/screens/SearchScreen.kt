@@ -139,6 +139,7 @@ import com.theveloper.pixelplay.utils.formatSongCount
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -1288,9 +1289,12 @@ fun SearchResultsList(
                             }
 
                             is SearchResultItem.PlaylistItem -> {
-                                val playlistSongs by remember(item.playlist.songIds, playerViewModel) {
+                                val playlistSongsRaw by remember(item.playlist.songIds, playerViewModel) {
                                     playerViewModel.observeSongs(item.playlist.songIds)
                                 }.collectAsStateWithLifecycle(initialValue = emptyList())
+                                val playlistSongs = remember(playlistSongsRaw) {
+                                    playlistSongsRaw.toPersistentList()
+                                }
                                 val coroutineScope = rememberCoroutineScope()
                                 val onPlayClick: () -> Unit = {
                                     coroutineScope.launch {
@@ -1565,7 +1569,7 @@ fun SearchResultArtistItem(
 @Composable
 fun SearchResultPlaylistItem(
     playlist: Playlist,
-    playlistSongs: List<Song>,
+    playlistSongs: kotlinx.collections.immutable.ImmutableList<Song>,
     onOpenClick: () -> Unit,
     onPlayClick: () -> Unit,
     isSelected: Boolean = false,

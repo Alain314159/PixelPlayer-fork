@@ -121,9 +121,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import androidx.compose.ui.platform.LocalView
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.theveloper.pixelplay.data.preferences.dataStore
 
@@ -177,6 +179,29 @@ internal fun lyricsSheetColors(colorScheme: ColorScheme): LyricsSheetColors {
         syncButtonContent = colorScheme.onSecondaryFixed
     )
 }
+
+/** Single snapshot of all seven lyrics-sheet preferences read directly from DataStore. */
+@androidx.compose.runtime.Immutable
+private data class LyricsSheetPrefs(
+    val alignment: String = "left",
+    val showTranslation: Boolean = true,
+    val showRomanization: Boolean = true,
+    val useAnimated: Boolean = false,
+    val animatedBlurEnabled: Boolean = true,
+    val animatedBlurStrength: Float = 2.5f,
+    val keepScreenOn: Boolean = false
+)
+
+private fun androidx.datastore.preferences.core.Preferences.toLyricsSheetPrefs(): LyricsSheetPrefs =
+    LyricsSheetPrefs(
+        alignment = this[stringPreferencesKey("lyrics_alignment")] ?: "left",
+        showTranslation = this[booleanPreferencesKey("show_lyrics_translation")] ?: true,
+        showRomanization = this[booleanPreferencesKey("show_lyrics_romanization")] ?: true,
+        useAnimated = this[booleanPreferencesKey("use_animated_lyrics")] ?: false,
+        animatedBlurEnabled = this[booleanPreferencesKey("animated_lyrics_blur_enabled")] ?: true,
+        animatedBlurStrength = this[floatPreferencesKey("animated_lyrics_blur_strength")] ?: 2.5f,
+        keepScreenOn = this[booleanPreferencesKey("keep_screen_on_lyrics")] ?: false
+    )
 
 private fun preferredContrastColor(
     background: Color,
@@ -299,10 +324,15 @@ fun LyricsSheet(
     val playPauseColor = sheetColors.playPauseContainer
     val onPlayPauseColor = sheetColors.playPauseContent
 
-    val isLoadingLyrics by remember(stablePlayerState) { derivedStateOf { stablePlayerState.isLoadingLyrics } }
-    val lyrics by remember(stablePlayerState) { derivedStateOf { stablePlayerState.lyrics } }
-    val isPlaying by remember(stablePlayerState) { derivedStateOf { stablePlayerState.isPlaying } }
-    val currentSong by remember(stablePlayerState) { derivedStateOf { stablePlayerState.currentSong } }
+    // These are plain captured values from the stablePlayerState parameter, not
+    // reads of State<T>, so derivedStateOf adds an extra State layer without
+    // the dependency-tracking it normally provides. Direct destructuring is
+    // sufficient — when stablePlayerState recomposes the parent, these locals
+    // recompute as part of the normal recomposition.
+    val isLoadingLyrics = stablePlayerState.isLoadingLyrics
+    val lyrics = stablePlayerState.lyrics
+    val isPlaying = stablePlayerState.isPlaying
+    val currentSong = stablePlayerState.currentSong
 
     val hasTranslatedLyrics = remember(lyrics) {
         // Translated lyrics read same timestamp on the lrc, not possible in plain type lyrics
@@ -360,6 +390,29 @@ fun LyricsSheet(
     val animatedLyricsBlurStrength = lyricsPrefs.animatedLyricsBlurStrength
     var keepScreenOn by remember { mutableStateOf(false) }
     // Sync DataStore → local state
+    // Read all seven lyrics-sheet preferences in a single DataStore subscription.
+    // Previously each preference (alignment, translation, romanization, animated,
+    // blur enabled, blur strength, keep-screen-on) created its own collector
+    // mapping the same Preferences object — seven collectors observing one flow.
+    // Combined into a single mapped flow with distinctUntilChanged. The
+    // architectural-violation note from the perf audit (these reads bypass
+    // UserPreferencesRepository) is still open as a separate refactor.
+    val lyricsPrefs by remember(context) {
+        context.dataStore.data
+            .map { prefs -> prefs.toLyricsSheetPrefs() }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = LyricsSheetPrefs())
+    val lyricsAlignment = lyricsPrefs.alignment
+    val showLyricsTranslation = lyricsPrefs.showTranslation
+    val showLyricsRomanization = lyricsPrefs.showRomanization
+    val useAnimatedLyrics = lyricsPrefs.useAnimated
+    val animatedLyricsBlurEnabled = lyricsPrefs.animatedBlurEnabled
+    val animatedLyricsBlurStrength = lyricsPrefs.animatedBlurStrength
+
+    // keep-screen-on still uses a mutable local state because the lifecycle
+    // observer below writes back to DataStore on ON_STOP, and the sheet's
+    // toggle button drives it locally.
+    var keepScreenOn by remember { mutableStateOf(false) }
     LaunchedEffect(lyricsPrefs.keepScreenOn) {
         keepScreenOn = lyricsPrefs.keepScreenOn
     }
@@ -381,29 +434,6 @@ fun LyricsSheet(
             }
         }
 
-        if (keepScreenOn) {
-            view.keepScreenOn = true
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            view.keepScreenOn = false
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    DisposableEffect(keepScreenOn, lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP && keepScreenOn) {
-                keepScreenOn = false
-                coroutineScope.launch {
-                    context.dataStore.edit { prefs ->
-                        prefs[booleanPreferencesKey("keep_screen_on_lyrics")] = false
-                    }
-                }
-            }
-        }
-        
         if (keepScreenOn) {
             view.keepScreenOn = true
         }

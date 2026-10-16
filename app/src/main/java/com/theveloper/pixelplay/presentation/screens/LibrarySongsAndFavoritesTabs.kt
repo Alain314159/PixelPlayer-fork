@@ -104,11 +104,14 @@ fun LibraryFavoritesTab(
     var lastHandledFavoriteSortKey by remember { mutableStateOf(sortOption.storageKey) }
     var pendingFavoriteSortScrollReset by remember { mutableStateOf(false) }
     var favoriteSortSawRefreshLoading by remember { mutableStateOf(false) }
-    val currentSongId by remember(playerViewModel) {
+    // Shared playback projection so every item below gets the same hints
+    // instance instead of starting its own stablePlayerState collector.
+    val playbackHints by remember(playerViewModel) {
         playerViewModel.stablePlayerState
-            .map { it.currentSong?.id }
+            .map { LibraryPlaybackHints(it.currentSong?.id, it.isPlaying) }
             .distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = null)
+    }.collectAsStateWithLifecycle(initialValue = LibraryPlaybackHints())
+    val currentSongId = playbackHints.currentSongId
 
     val currentSongListIndex = remember(favoriteSongs.itemCount, currentSongId) {
         if (currentSongId == null) -1
@@ -248,7 +251,7 @@ fun LibraryFavoritesTab(
                             if (song != null) {
                                 LibraryPlaybackAwareSongItem(
                                     song = song,
-                                    playerViewModel = playerViewModel,
+                                    playbackHints = playbackHints,
                                     onMoreOptionsClick = { onMoreOptionsClick(song) },
                                     isSelected = selectedSongIds.contains(song.id),
                                     selectionIndex = if (isSelectionMode) getSelectionIndex(song.id) else null,

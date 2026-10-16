@@ -48,7 +48,12 @@ class UserPreferencesRepositoryTest {
                     scope = backgroundScope,
                     produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
                 ),
-                json = Json
+                playbackStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("playback.preferences_pb").toFile() }
+                ),
+                json = Json,
+                migrationScope = backgroundScope,
             )
 
             repository.setInitialSetupDone(true)
@@ -72,7 +77,12 @@ class UserPreferencesRepositoryTest {
                     scope = backgroundScope,
                     produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
                 ),
-                json = Json
+                playbackStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("playback.preferences_pb").toFile() }
+                ),
+                json = Json,
+                migrationScope = backgroundScope,
             )
 
             repository.setInitialSetupDone(true)
@@ -105,7 +115,12 @@ class UserPreferencesRepositoryTest {
                     scope = backgroundScope,
                     produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
                 ),
-                json = Json
+                playbackStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("playback.preferences_pb").toFile() }
+                ),
+                json = Json,
+                migrationScope = backgroundScope,
             )
 
             repository.setNavBarCornerRadius(-1)

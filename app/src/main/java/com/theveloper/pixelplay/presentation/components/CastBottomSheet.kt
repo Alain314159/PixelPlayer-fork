@@ -89,6 +89,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.getValue
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -185,6 +187,14 @@ fun CastBottomSheet(
     val isPlaying by remember(playerViewModel) {
         playerViewModel.stablePlayerState.map { it.isPlaying }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = playerViewModel.stablePlayerState.value.isPlaying)
+    // Slice the stablePlayerState flow to just isPlaying before collecting; the
+    // full StablePlayerState changes on every position tick (~4×/s) but only
+    // isPlaying matters here.
+    val isPlaying by remember(playerViewModel) {
+        playerViewModel.stablePlayerState
+            .map { it.isPlaying }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
     val context = LocalContext.current
 
     val requiredPermissions = remember {
@@ -209,6 +219,7 @@ fun CastBottomSheet(
         missingPermissions = missingCastPermissions(context, requiredPermissions)
         if (missingPermissions.isEmpty()) {
             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
+            playerViewModel.refreshCastRoutes()
         }
     }
 
@@ -216,79 +227,106 @@ fun CastBottomSheet(
         missingPermissions = missingCastPermissions(context, requiredPermissions)
         if (missingPermissions.isEmpty()) {
             playerViewModel.refreshLocalConnectionInfo(refreshBluetoothDevices = true)
+            playerViewModel.refreshCastRoutes()
+        }
+    }
+
+    LaunchedEffect(isWifiRadioOn, isWifiEnabled) {
+        if ((isWifiRadioOn || isWifiEnabled) && missingPermissions.isEmpty()) {
+            playerViewModel.refreshCastRoutes()
         }
     }
 
     val activeRoute = selectedRoute?.takeUnless { it.isDefault }
     val isRemoteSession = (isRemotePlaybackActive || isCastConnecting) && activeRoute != null
 
-    val availableRoutes = if (isWifiEnabled) {
-        routes.filterNot { it.isDefault }
-    } else {
-        emptyList()
+    // Derived lists wrapped in remember so they don't rebuild on every recomposition.
+    // The sheet ticks frequently (Bluetooth state changes, Wi-Fi name updates, route
+    // volume drag, etc.) — without these wrappers each tick re-filters/re-maps the
+    // route + bluetooth lists.
+    val availableRoutes = remember(routes, isWifiRadioOn, isWifiEnabled) {
+        val nonDefault = routes.filterNot { it.isDefault }
+        if (nonDefault.isNotEmpty() || isWifiRadioOn || isWifiEnabled) nonDefault else emptyList()
     }
-    val bluetoothDevices = bluetoothAudioDeviceStates
-        .map { state -> state.copy(name = state.name.trim()) }
-        .filter { it.name.isNotEmpty() }
-        .distinctBy { it.stableId() }
-    val activeBluetoothName = bluetoothName
-        ?.trim()
-        ?.takeIf { activeName ->
-            activeName.isNotEmpty() && bluetoothDevices.any { it.name == activeName }
-        }
+    val bluetoothDevices = remember(bluetoothAudioDeviceStates) {
+        bluetoothAudioDeviceStates
+            .map { state -> state.copy(name = state.name.trim()) }
+            .filter { it.name.isNotEmpty() }
+            .distinctBy { it.stableId() }
+    }
+    val activeBluetoothName = remember(bluetoothName, bluetoothDevices) {
+        bluetoothName
+            ?.trim()
+            ?.takeIf { activeName ->
+                activeName.isNotEmpty() && bluetoothDevices.any { it.name == activeName }
+            }
+    }
 
-    val devices = buildList {
-        if (isWifiEnabled) {
-            addAll(
-                availableRoutes.map { route ->
-                    val isRouteActive = activeRoute?.id == route.id
-                    val normalizedConnectionState = when {
-                        isRouteActive && isCastConnecting ->
-                            MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING
-                        isRouteActive && isRemoteSession ->
-                            MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
-                        route.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED ->
-                            MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
-                        else -> route.connectionState
+    val devices = remember(
+        isWifiRadioOn,
+        isWifiEnabled,
+        isBluetoothEnabled,
+        availableRoutes,
+        bluetoothDevices,
+        activeRoute?.id,
+        isCastConnecting,
+        isRemoteSession,
+        activeBluetoothName,
+        trackVolume
+    ) {
+        buildList {
+            if (availableRoutes.isNotEmpty() || isWifiRadioOn || isWifiEnabled) {
+                addAll(
+                    availableRoutes.map { route ->
+                        val isRouteActive = activeRoute?.id == route.id
+                        val normalizedConnectionState = when {
+                            isRouteActive && isCastConnecting ->
+                                MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTING
+                            isRouteActive && isRemoteSession ->
+                                MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
+                            route.connectionState == MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED ->
+                                MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
+                            else -> route.connectionState
+                        }
+
+                        CastDeviceUi(
+                            id = route.id,
+                            name = route.name,
+                            deviceType = route.deviceType,
+                            playbackType = route.playbackType,
+                            connectionState = normalizedConnectionState,
+                            volumeHandling = route.volumeHandling,
+                            volume = route.volume,
+                            volumeMax = route.volumeMax,
+                            isSelected = isRouteActive
+                        )
                     }
+                )
+            }
 
-                    CastDeviceUi(
-                        id = route.id,
-                        name = route.name,
-                        deviceType = route.deviceType,
-                        playbackType = route.playbackType,
-                        connectionState = normalizedConnectionState,
-                        volumeHandling = route.volumeHandling,
-                        volume = route.volume,
-                        volumeMax = route.volumeMax,
-                        isSelected = isRouteActive
+            if (isBluetoothEnabled) {
+                bluetoothDevices.forEach { bluetoothDevice ->
+                    val isConnected = bluetoothDevice.name == activeBluetoothName
+                    add(
+                        CastDeviceUi(
+                            id = "bluetooth_${bluetoothDevice.stableId()}",
+                            name = bluetoothDevice.name,
+                            deviceType = MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH_A2DP,
+                            playbackType = MediaRouter.RouteInfo.PLAYBACK_TYPE_LOCAL,
+                            connectionState = if (isConnected) {
+                                MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
+                            } else {
+                                MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
+                            },
+                            volumeHandling = MediaRouter.RouteInfo.PLAYBACK_VOLUME_VARIABLE,
+                            volume = if (isConnected) (trackVolume * 100).toInt() else 0,
+                            volumeMax = 100,
+                            isSelected = isConnected && !isRemoteSession,
+                            batteryPercent = bluetoothDevice.batteryPercent,
+                            isBluetooth = true
+                        )
                     )
                 }
-            )
-        }
-
-        if (isBluetoothEnabled) {
-            bluetoothDevices.forEach { bluetoothDevice ->
-                val isConnected = bluetoothDevice.name == activeBluetoothName
-                add(
-                    CastDeviceUi(
-                        id = "bluetooth_${bluetoothDevice.stableId()}",
-                        name = bluetoothDevice.name,
-                        deviceType = MediaRouter.RouteInfo.DEVICE_TYPE_BLUETOOTH_A2DP,
-                        playbackType = MediaRouter.RouteInfo.PLAYBACK_TYPE_LOCAL,
-                        connectionState = if (isConnected) {
-                            MediaRouter.RouteInfo.CONNECTION_STATE_CONNECTED
-                        } else {
-                            MediaRouter.RouteInfo.CONNECTION_STATE_DISCONNECTED
-                        },
-                        volumeHandling = MediaRouter.RouteInfo.PLAYBACK_VOLUME_VARIABLE,
-                        volume = if (isConnected) (trackVolume * 100).toInt() else 0,
-                        volumeMax = 100,
-                        isSelected = isConnected && !isRemoteSession,
-                        batteryPercent = bluetoothDevice.batteryPercent,
-                        isBluetooth = true
-                    )
-                )
             }
         }
     }
@@ -344,8 +382,12 @@ fun CastBottomSheet(
     )
 
     DisposableEffect(Unit) {
+        playerViewModel.acquireMulticastLock()
         onExpansionChanged(1f)
-        onDispose { onExpansionChanged(0f) }
+        onDispose {
+            playerViewModel.releaseMulticastLock()
+            onExpansionChanged(0f)
+        }
     }
 
     ModalBottomSheet(
@@ -580,7 +622,7 @@ private fun CastSheetContent(
     onRefresh: () -> Unit,
     startWithControls: Boolean = true
 ) {
-    val allConnectivityOff = !state.wifiEnabled && !state.isBluetoothEnabled
+    val allConnectivityOff = !(state.wifiEnabled || state.wifiRadioOn) && !state.isBluetoothEnabled
     val configuration = LocalConfiguration.current
     val safeInsets = WindowInsets.safeDrawing.asPaddingValues()
     val maxPagerHeight = (

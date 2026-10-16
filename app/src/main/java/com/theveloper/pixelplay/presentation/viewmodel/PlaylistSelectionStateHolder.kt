@@ -17,6 +17,13 @@ import javax.inject.Singleton
 @Singleton
 class PlaylistSelectionStateHolder @Inject constructor() {
 
+    // Guards multi-flow mutations so a reader of the four exposed StateFlows
+    // observes a coherent final state. `_selectedPlaylists.update {}` alone
+    // only made one flow atomic; the sibling writes for ids/count/mode could
+    // race with another toggle landing in the gap. A single synchronized
+    // block around the whole read-modify-write closes that gap.
+    private val mutationLock = Any()
+
     // Internal mutable state - uses List to preserve selection order
     private val _selectedPlaylists = MutableStateFlow<List<Playlist>>(emptyList())
     
@@ -50,20 +57,16 @@ class PlaylistSelectionStateHolder @Inject constructor() {
      * @param playlist The playlist to toggle
      */
     fun toggleSelection(playlist: Playlist) {
-        val currentList = _selectedPlaylists.value.toMutableList()
-        val currentIds = _selectedPlaylistIds.value.toMutableSet()
-        
-        if (currentIds.contains(playlist.id)) {
-            // Remove from selection
-            currentList.removeAll { it.id == playlist.id }
-            currentIds.remove(playlist.id)
-        } else {
-            // Add to selection (preserving order)
-            currentList.add(playlist)
-            currentIds.add(playlist.id)
+        synchronized(mutationLock) {
+            val currentList = _selectedPlaylists.value
+            val currentIds = _selectedPlaylistIds.value
+            val (newList, newIds) = if (playlist.id in currentIds) {
+                currentList.filter { it.id != playlist.id } to (currentIds - playlist.id)
+            } else {
+                (currentList + playlist) to (currentIds + playlist.id)
+            }
+            updateStateLocked(newList, newIds)
         }
-        
-        updateState(currentList, currentIds)
     }
 
     /**
@@ -74,25 +77,29 @@ class PlaylistSelectionStateHolder @Inject constructor() {
      * @param playlists The complete list of playlists to select
      */
     fun selectAll(playlists: List<Playlist>) {
-        val currentIds = _selectedPlaylistIds.value
-        val currentList = _selectedPlaylists.value.toMutableList()
-        
-        // Add playlists that aren't already selected
-        playlists.forEach { playlist ->
-            if (!currentIds.contains(playlist.id)) {
-                currentList.add(playlist)
+        synchronized(mutationLock) {
+            val currentIds = _selectedPlaylistIds.value
+            val currentList = _selectedPlaylists.value.toMutableList()
+
+            // Add playlists that aren't already selected
+            playlists.forEach { playlist ->
+                if (!currentIds.contains(playlist.id)) {
+                    currentList.add(playlist)
+                }
             }
+
+            val newIds = currentList.map { it.id }.toSet()
+            updateStateLocked(currentList, newIds)
         }
-        
-        val newIds = currentList.map { it.id }.toSet()
-        updateState(currentList, newIds)
     }
 
     /**
      * Clears all selected playlists, exiting selection mode.
      */
     fun clearSelection() {
-        updateState(emptyList(), emptySet())
+        synchronized(mutationLock) {
+            updateStateLocked(emptyList(), emptySet())
+        }
     }
 
     /**
@@ -124,17 +131,20 @@ class PlaylistSelectionStateHolder @Inject constructor() {
      * @param playlistId The ID of the playlist to remove
      */
     fun removeFromSelection(playlistId: String) {
-        if (!_selectedPlaylistIds.value.contains(playlistId)) return
-        
-        val currentList = _selectedPlaylists.value.filter { it.id != playlistId }
-        val currentIds = _selectedPlaylistIds.value - playlistId
-        updateState(currentList, currentIds)
+        synchronized(mutationLock) {
+            val currentIds = _selectedPlaylistIds.value
+            if (playlistId !in currentIds) return
+            val newList = _selectedPlaylists.value.filter { it.id != playlistId }
+            updateStateLocked(newList, currentIds - playlistId)
+        }
     }
 
     /**
-     * Updates all state flows atomically.
+     * Updates all four state flows. Callers MUST hold [mutationLock] so the
+     * four `.value =` assignments land without an interleaving mutation
+     * leaving the ids/list/count/mode flows out of sync.
      */
-    private fun updateState(playlists: List<Playlist>, ids: Set<String>) {
+    private fun updateStateLocked(playlists: List<Playlist>, ids: Set<String>) {
         _selectedPlaylists.value = playlists
         _selectedPlaylistIds.value = ids
         _selectedCount.value = playlists.size

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import timber.log.Timber
+import android.net.wifi.WifiManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,9 +30,15 @@ import javax.inject.Singleton
  */
 @Singleton
 class CastStateHolder @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    @com.theveloper.pixelplay.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) {
     private val CAST_STATE_TAG = "CastStateHolder"
+
+    private val wifiManager: WifiManager? by lazy {
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    }
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     // Cast session manager
     val sessionManager: SessionManager? by lazy {
@@ -100,8 +107,7 @@ class CastStateHolder @Inject constructor(
      * Check if a route is a Cast route.
      */
     fun MediaRouter.RouteInfo.isCastRoute(): Boolean {
-        return supportsControlCategory(MediaControlIntent.CATEGORY_REMOTE_PLAYBACK) ||
-            supportsControlCategory(castControlCategory)
+        return matchesSelector(buildCastRouteSelector())
     }
     
     /**
@@ -181,32 +187,46 @@ class CastStateHolder @Inject constructor(
         pendingRemoteSongId = null
     }
     
-    // MediaRouter State
-    private val mediaRouter: MediaRouter = MediaRouter.getInstance(context)
+    // MediaRouter State. Lazy so MediaRouter.getInstance — which on Cast SDK
+    // versions has triggered Cast SDK initialization on the calling thread —
+    // doesn't run on the first-frame critical path of the singleton graph.
+    private val mediaRouter: MediaRouter by lazy { MediaRouter.getInstance(context) }
     private val mediaRouterCallback = object : MediaRouter.Callback() {
         override fun onRouteAdded(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                updateRoutes()
+                syncSelectedRouteFromRouter(router)
+            }
         }
         override fun onRouteRemoved(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                updateRoutes()
+                syncSelectedRouteFromRouter(router)
+            }
         }
         override fun onRouteChanged(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                updateRoutes()
+                syncSelectedRouteFromRouter(router)
+            }
         }
         override fun onRouteSelected(router: MediaRouter, route: MediaRouter.RouteInfo) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                updateRoutes()
+                syncSelectedRouteFromRouter(router)
+            }
         }
         override fun onRouteUnselected(router: MediaRouter, route: MediaRouter.RouteInfo, reason: Int) {
-            updateRoutes()
-            syncSelectedRouteFromRouter(router)
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                updateRoutes()
+                syncSelectedRouteFromRouter(router)
+            }
         }
         override fun onRouteVolumeChanged(router: MediaRouter, route: MediaRouter.RouteInfo) {
-             if (route.id == _selectedRoute.value?.id) {
-                _routeVolume.value = route.volume
+            appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                 if (route.id == _selectedRoute.value?.id) {
+                    _routeVolume.value = route.volume
+                }
             }
         }
     }
@@ -223,16 +243,15 @@ class CastStateHolder @Inject constructor(
     private val _isRefreshingRoutes = MutableStateFlow(false)
     val isRefreshingRoutes: StateFlow<Boolean> = _isRefreshingRoutes.asStateFlow()
     
-    // Coroutine scope for delays (injected via initialize or use GlobalScope helper if Singleton? 
-    // Ideally we should have a scope. Since it is Singleton, we can use a custom scope or suspend functions.)
-    // But refreshRoutes was launched in ViewModel.
-    // We will make refreshRoutes suspend.
-
+    // refreshRoutes runs against @AppScope so a Cast-route refresh kicked
+    // off mid-flight survives ViewModel teardown (e.g. user rotates while
+    // discovery is running). Per-call cancellation is handled via the
+    // job field below.
     private var refreshRoutesJob: kotlinx.coroutines.Job? = null
 
-    fun refreshRoutes(scope: kotlinx.coroutines.CoroutineScope) {
+    fun refreshRoutes(@Suppress("UNUSED_PARAMETER") scope: kotlinx.coroutines.CoroutineScope = appScope) {
         refreshRoutesJob?.cancel()
-        refreshRoutesJob = scope.launch {
+        refreshRoutesJob = appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
             _isRefreshingRoutes.value = true
             mediaRouter.removeCallback(mediaRouterCallback)
             val mediaRouteSelector = buildCastRouteSelector()
@@ -259,10 +278,12 @@ class CastStateHolder @Inject constructor(
     }
 
     fun startDiscovery() {
-        val mediaRouteSelector = buildCastRouteSelector()
-        mediaRouter.addCallback(mediaRouteSelector, mediaRouterCallback, MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
-        updateRoutes()
-        syncSelectedRouteFromRouter(mediaRouter)
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            val mediaRouteSelector = buildCastRouteSelector()
+            mediaRouter.addCallback(mediaRouteSelector, mediaRouterCallback, MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY)
+            updateRoutes()
+            syncSelectedRouteFromRouter(mediaRouter)
+        }
     }
 
     private fun updateRoutes() {
@@ -276,23 +297,74 @@ class CastStateHolder @Inject constructor(
     }
 
     fun selectRoute(route: MediaRouter.RouteInfo) {
-        mediaRouter.selectRoute(route)
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            mediaRouter.selectRoute(route)
+        }
     }
 
     fun setRouteVolume(volume: Int) {
         _routeVolume.value = volume
-        _selectedRoute.value?.requestSetVolume(volume)
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            _selectedRoute.value?.requestSetVolume(volume)
+        }
     }
     
     fun disconnect() {
-        mediaRouter.selectRoute(mediaRouter.defaultRoute)
-        syncSelectedRouteFromRouter(mediaRouter)
-        updateRoutes()
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            mediaRouter.selectRoute(mediaRouter.defaultRoute)
+            syncSelectedRouteFromRouter(mediaRouter)
+            updateRoutes()
+        }
     }
     
+    /**
+     * Acquire Wifi MulticastLock to allow local network mDNS discovery on devices
+     * that block multicast by default (e.g. Oplus, Xiaomi, custom ROMs).
+     */
+    fun acquireMulticastLock() {
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            try {
+                if (multicastLock == null) {
+                    multicastLock = wifiManager?.createMulticastLock("PixelPlayer:CastDiscovery")?.apply {
+                        setReferenceCounted(false)
+                    }
+                }
+                multicastLock?.let { lock ->
+                    if (!lock.isHeld) {
+                        lock.acquire()
+                        Timber.tag(CAST_STATE_TAG).i("Wifi MulticastLock acquired successfully")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.tag(CAST_STATE_TAG).e(e, "Failed to acquire Wifi MulticastLock")
+            }
+        }
+    }
+
+    /**
+     * Release the Wifi MulticastLock.
+     */
+    fun releaseMulticastLock() {
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            try {
+                multicastLock?.let { lock ->
+                    if (lock.isHeld) {
+                        lock.release()
+                        Timber.tag(CAST_STATE_TAG).i("Wifi MulticastLock released successfully")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.tag(CAST_STATE_TAG).e(e, "Failed to release Wifi MulticastLock")
+            }
+        }
+    }
+
     fun onCleared() {
         refreshRoutesJob?.cancel()
-        mediaRouter.removeCallback(mediaRouterCallback)
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            mediaRouter.removeCallback(mediaRouterCallback)
+            releaseMulticastLock()
+        }
     }
 
     init {

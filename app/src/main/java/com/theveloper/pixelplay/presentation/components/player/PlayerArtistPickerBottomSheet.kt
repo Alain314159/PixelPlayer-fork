@@ -42,6 +42,7 @@ import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import kotlinx.collections.immutable.ImmutableList
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
 private data class PlayerArtistShortcutItem(
@@ -53,7 +54,7 @@ private data class PlayerArtistShortcutItem(
 @Composable
 internal fun PlayerArtistPickerBottomSheet(
     song: Song,
-    artists: List<Artist>,
+    artists: ImmutableList<Artist>,
     sheetState: SheetState,
     onDismiss: () -> Unit,
     onArtistClick: (Artist) -> Unit

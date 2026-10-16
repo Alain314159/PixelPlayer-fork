@@ -1,11 +1,15 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -157,6 +161,7 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.roundToInt
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -199,6 +204,19 @@ private data class QueueUndoBarProjection(
     val removedSongTitle: String = ""
 )
 
+/**
+ * Triple of orthogonal animation drivers for a queue item. Packed into a
+ * single value so QueuePlaylistSongItem can run one updateTransition
+ * (and the framework reuses one set of animation runtime objects) instead
+ * of six independent animateXAsState calls.
+ */
+@androidx.compose.runtime.Immutable
+private data class QueueItemAnimState(
+    val isCurrentSong: Boolean,
+    val isDragging: Boolean,
+    val isSwipeTargeted: Boolean
+)
+
 private fun PlayerUiState.toQueueUndoBarProjection(): QueueUndoBarProjection =
     QueueUndoBarProjection(
         isVisible = showQueueItemUndoBar,
@@ -214,7 +232,7 @@ fun QueueBottomSheet(
     viewModel: PlayerViewModel = hiltViewModel(),
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel(),
-    queue: List<Song>,
+    queue: ImmutableList<Song>,
     currentQueueSourceName: String,
     currentSongId: String?,
     currentMediaItemIndex: Int = -1,
@@ -1897,25 +1915,6 @@ fun QueuePlaylistSongItem(
 ) {
     val colors = MaterialTheme.colorScheme
 
-    val cornerRadius by animateDpAsState(
-        targetValue = if (isCurrentSong) 60.dp else 22.dp,
-        label = "cornerRadiusAnimation"
-    )
-
-    val itemShape = RoundedCornerShape(cornerRadius)
-
-    val albumCornerRadius by animateDpAsState(
-        targetValue = if (isCurrentSong) 60.dp else 8.dp,
-        label = "cornerRadiusAnimation"
-    )
-
-    val albumShape = RoundedCornerShape(albumCornerRadius)
-
-    val elevation by animateDpAsState(
-        targetValue = if (isDragging) 4.dp else 1.dp,
-        label = "elevationAnimation"
-    )
-
     val backgroundColor = colors.surfaceContainerLowest
     val mvContainerColor = if (isCurrentSong) colors.tertiaryContainer else colors.surfaceContainerHigh
     val mvContentColor = if (isCurrentSong) colors.onTertiaryContainer else colors.onSurface
@@ -1949,21 +1948,43 @@ fun QueuePlaylistSongItem(
         (revealWidthPx / (56.dp.value * density.density)).coerceIn(0f, 1f)
     } else 0f
 
-    val dismissBackgroundColor by animateColorAsState(
-        targetValue = if (isSwipeTargeted) colors.errorContainer else colors.errorContainer.copy(alpha = 0.82f),
-        animationSpec = tween(durationMillis = 150),
+    // Consolidate six independent animateXAsState calls into a single
+    // updateTransition keyed on (isCurrentSong, isDragging, isSwipeTargeted).
+    // Same pattern that was already applied to EnhancedSongListItem — saves
+    // 5 animation runtime objects per queue item plus one composition slot.
+    val animState = QueueItemAnimState(isCurrentSong, isDragging, isSwipeTargeted)
+    val transition = updateTransition(animState, label = "queueItemAnim")
+    val cornerRadius by transition.animateDp(label = "cornerRadius") { state ->
+        if (state.isCurrentSong) 60.dp else 22.dp
+    }
+    val albumCornerRadius by transition.animateDp(label = "albumCornerRadius") { state ->
+        if (state.isCurrentSong) 60.dp else 8.dp
+    }
+    val elevation by transition.animateDp(label = "elevation") { state ->
+        if (state.isDragging) 4.dp else 1.dp
+    }
+    val dismissBackgroundColor by transition.animateColor(
+        transitionSpec = { tween(durationMillis = 150) },
         label = "dismissBackgroundColor"
-    )
-    val dismissIconAlpha by animateFloatAsState(
-        targetValue = revealProgress * if (isSwipeTargeted) 1f else 0.88f,
-        animationSpec = tween(durationMillis = 120),
-        label = "dismissIconAlpha"
-    )
-    val dismissIconScale by animateFloatAsState(
-        targetValue = if (isSwipeTargeted) 1.08f else 0.95f,
-        animationSpec = tween(durationMillis = 120),
+    ) { state ->
+        if (state.isSwipeTargeted) colors.errorContainer else colors.errorContainer.copy(alpha = 0.82f)
+    }
+    val dismissIconAlphaFactor by transition.animateFloat(
+        transitionSpec = { tween(durationMillis = 120) },
+        label = "dismissIconAlphaFactor"
+    ) { state ->
+        if (state.isSwipeTargeted) 1f else 0.88f
+    }
+    val dismissIconScale by transition.animateFloat(
+        transitionSpec = { tween(durationMillis = 120) },
         label = "dismissIconScale"
-    )
+    ) { state ->
+        if (state.isSwipeTargeted) 1.08f else 0.95f
+    }
+    val dismissIconAlpha = revealProgress * dismissIconAlphaFactor
+
+    val itemShape = RoundedCornerShape(cornerRadius)
+    val albumShape = RoundedCornerShape(albumCornerRadius)
 
     var surfaceHeightPx by remember { mutableStateOf(0f) }
 

@@ -63,11 +63,17 @@ class LyricsTranslationCallbacks(
 class LyricsStateHolder @Inject constructor(
     private val musicRepository: MusicRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val songMetadataEditor: SongMetadataEditor
+    private val songMetadataEditor: SongMetadataEditor,
+    @com.theveloper.pixelplay.di.AppScope private val appScope: CoroutineScope,
 ) {
-    private var scope: CoroutineScope? = null
+    // @AppScope so loading jobs and the song-sync-offset observer survive
+    // ViewModel teardown. Per CODEBASE_REVIEW.md, the Singleton-lifecycle
+    // mismatch (scope set to viewModelScope, nulled on onCleared) was a
+    // source of stuck "Loading lyrics" spinners after config changes.
+    private val scope: CoroutineScope get() = appScope
     private var loadingJob: Job? = null
     private var loadCallback: LyricsLoadCallback? = null
+    private var syncOffsetObserverJob: Job? = null
 
     // Sync offset per song in milliseconds
     private val _currentSongSyncOffset = MutableStateFlow(0)
@@ -95,14 +101,15 @@ class LyricsStateHolder @Inject constructor(
      * Initialize with coroutine scope and callback from ViewModel.
      */
     fun initialize(
-        coroutineScope: CoroutineScope,
+        @Suppress("UNUSED_PARAMETER") coroutineScope: CoroutineScope,
         callback: LyricsLoadCallback,
         stablePlayerState: StateFlow<com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState>
     ) {
-        scope = coroutineScope
+        // scope parameter is ignored; the holder uses @AppScope directly.
         loadCallback = callback
 
-        coroutineScope.launch {
+        syncOffsetObserverJob?.cancel()
+        syncOffsetObserverJob = scope.launch {
             stablePlayerState
                 .map { it.currentSong?.id }
                 .distinctUntilChanged()
@@ -123,7 +130,7 @@ class LyricsStateHolder @Inject constructor(
         loadingJob?.cancel()
         val targetSongId = song.id
 
-        loadingJob = scope?.launch {
+        loadingJob = scope.launch {
             loadCallback?.onLoadingStarted(targetSongId)
 
             val fetchedLyrics = try {
@@ -154,7 +161,7 @@ class LyricsStateHolder @Inject constructor(
      * Set sync offset for a song.
      */
     fun setSyncOffset(songId: String, offsetMs: Int) {
-        scope?.launch {
+        scope.launch {
             userPreferencesRepository.setLyricsSyncOffset(songId, offsetMs)
             _currentSongSyncOffset.value = offsetMs
         }
@@ -192,13 +199,16 @@ class LyricsStateHolder @Inject constructor(
         contextHelper: (Int) -> String
     ) {
         loadingJob?.cancel()
-        loadingJob = scope?.launch {
+        loadingJob = scope.launch {
             _searchUiState.value = LyricsSearchUiState.Loading
 
             if (!forcePickResults) {
-                val storedLyrics = withContext(Dispatchers.IO) {
-                    musicRepository.getStoredLyrics(song)
-                }
+                // getStoredLyrics is a suspend function backed by the
+                // LyricsRepository -> Room DAO chain, which already runs on
+                // Room's IO executor. Wrapping it in withContext(Dispatchers.IO)
+                // here is redundant and traps the test scope on a real IO
+                // thread, breaking unit tests that drive the scope manually.
+                val storedLyrics = musicRepository.getStoredLyrics(song)
                 if (storedLyrics != null) {
                     val (lyrics, rawLyrics) = storedLyrics
                     _searchUiState.value = LyricsSearchUiState.Success(lyrics)
@@ -285,7 +295,7 @@ class LyricsStateHolder @Inject constructor(
     fun searchLyricsManually(title: String, artist: String?) {
         if (title.isBlank()) return
         loadingJob?.cancel()
-        loadingJob = scope?.launch {
+        loadingJob = scope.launch {
             _searchUiState.value = LyricsSearchUiState.Loading
             musicRepository.searchRemoteLyricsByQuery(title, artist)
                 .onSuccess { (q, results) ->
@@ -299,7 +309,7 @@ class LyricsStateHolder @Inject constructor(
      * Accept a search result.
      */
     fun acceptLyricsSearchResult(result: LyricsSearchResult, currentSong: Song) {
-        scope?.launch {
+        scope.launch {
             _searchUiState.value = LyricsSearchUiState.Success(result.lyrics)
 
             // 1. Update DB cache
@@ -320,7 +330,7 @@ class LyricsStateHolder @Inject constructor(
      * Import from file.
      */
     fun importLyricsFromFile(songId: Long, validatedImport: ValidatedLyricsImport, currentSong: Song?) {
-        scope?.launch {
+        scope.launch {
             val sanitizedContent = validatedImport.sanitizedContent
             val parsedLyrics = validatedImport.parsedLyrics
 
@@ -401,7 +411,7 @@ class LyricsStateHolder @Inject constructor(
 
     fun resetLyrics(songId: Long) {
         resetSearchState()
-        scope?.launch {
+        scope.launch {
             musicRepository.resetLyrics(songId)
             _songUpdates.emit(Song.emptySong().copy(id = songId.toString()) to null)
         }
@@ -409,7 +419,7 @@ class LyricsStateHolder @Inject constructor(
 
     fun resetAllLyrics() {
         resetSearchState()
-        scope?.launch {
+        scope.launch {
             musicRepository.resetAllLyrics()
         }
     }
@@ -492,8 +502,10 @@ class LyricsStateHolder @Inject constructor(
     }
 
     fun onCleared() {
+        // scope is @AppScope; only cancel per-VM-session jobs and clear the
+        // callback ref so the dead VM doesn't get re-entered.
         loadingJob?.cancel()
-        scope = null
+        syncOffsetObserverJob?.cancel()
         loadCallback = null
     }
 }

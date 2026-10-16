@@ -1330,7 +1330,7 @@ private fun predictSkipPreviousCarouselIndex(
 @Composable
 private fun FullPlayerSongMetadataSection(
     song: Song,
-    currentSongArtists: List<Artist>,
+    currentSongArtists: ImmutableList<Artist>,
     loadingTweaks: FullPlayerLoadingTweaks,
     isSheetDragGestureActive: Boolean,
     expansionFractionProvider: () -> Float,
@@ -1480,7 +1480,7 @@ private fun FullPlayerLandscapeContent(
 @Composable
 private fun SongMetadataDisplaySection(
     song: Song?,
-    currentSongArtists: List<Artist>,
+    currentSongArtists: ImmutableList<Artist>,
     expansionFractionProvider: () -> Float,
     textColor: Color,
     artistTextColor: Color,
@@ -2171,7 +2171,7 @@ private fun PlayerSongInfo(
     title: String,
     artist: String,
     artistId: Long,
-    artists: List<Artist>,
+    artists: ImmutableList<Artist>,
     expansionFractionProvider: () -> Float,
     textColor: Color,
     artistTextColor: Color,
@@ -2183,8 +2183,12 @@ private fun PlayerSongInfo(
 ) {
     val coroutineScope = rememberCoroutineScope()
     var isNavigatingToArtist by remember { mutableStateOf(false) }
-    val resolvedArtistId by remember(artists, artistId) {
-        derivedStateOf { artists.firstOrNull { it.id != 0L && it.id != -1L }?.id ?: artistId }
+    // derivedStateOf is unnecessary here: the calculation reads only the
+    // `artists` parameter and the captured `artistId`, not any State<T>.
+    // A plain remember is enough and skips an extra State allocation +
+    // snapshot read per recomposition.
+    val resolvedArtistId = remember(artists, artistId) {
+        artists.firstOrNull { it.id != 0L && it.id != -1L }?.id ?: artistId
     }
     val titleStyle = MaterialTheme.typography.headlineSmall.copy(
         fontWeight = FontWeight.Bold,
