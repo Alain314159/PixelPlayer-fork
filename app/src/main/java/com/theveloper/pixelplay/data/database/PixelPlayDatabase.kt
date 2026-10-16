@@ -39,6 +39,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     ],
     version = 43,
     exportSchema = true
+    version = 25, // Sanitizes oversized lyrics storage and clears legacy song lyrics blobs
+
+    exportSchema = false
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
     abstract fun albumArtThemeDao(): AlbumArtThemeDao
@@ -1745,5 +1748,9 @@ abstract class PixelPlayDatabase : RoomDatabase() {
             }
         }
 
+                db.execSQL("UPDATE songs SET lyrics = NULL")
+                db.execSQL("DELETE FROM lyrics WHERE LENGTH(content) > 50000")
+            }
+        }
     }
 }

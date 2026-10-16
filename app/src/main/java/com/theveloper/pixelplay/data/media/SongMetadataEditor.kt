@@ -99,7 +99,6 @@ class SongMetadataEditor(
         const val MAX_ALBUM_ARTIST_LENGTH = 500
         const val MAX_COMPOSER_LENGTH = 500
         const val MAX_GENRE_LENGTH = 100
-        const val MAX_LYRICS_LENGTH = 50_000
     }
 
     /**
@@ -121,7 +120,7 @@ class SongMetadataEditor(
         if (!albumArtist.isNullOrBlank() && albumArtist.length > MetadataLimits.MAX_ALBUM_ARTIST_LENGTH) return "Album artist name too long"
         if (!composer.isNullOrBlank() && composer.length > MetadataLimits.MAX_COMPOSER_LENGTH) return "Composer name too long"
         if (genre.length > MetadataLimits.MAX_GENRE_LENGTH) return "Genre too long"
-        if (lyrics.length > MetadataLimits.MAX_LYRICS_LENGTH) return "Lyrics too long"
+        if (lyrics.isNotBlank() && !LyricsStoragePolicy.canStore(lyrics)) return "Lyrics too long"
         return null
     }
 
@@ -478,6 +477,15 @@ class SongMetadataEditor(
                 trackNumber = newTrackNumber,
                 discNumber = newDiscNumber
             )
+            runBlocking {
+                musicDao.updateSongMetadata(
+                    songId,
+                    newTitle,
+                    newArtist,
+                    newAlbum,
+                    normalizedGenre,
+                    newTrackNumber
+                )
 
             coverArtUpdate?.let {
                 AlbumArtUtils.clearCacheForSong(context, songId)

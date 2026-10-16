@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LyricsDao {
@@ -17,11 +18,20 @@ interface LyricsDao {
     @Query("SELECT * FROM lyrics WHERE songId = :songId")
     suspend fun getLyrics(songId: Long): LyricsEntity?
 
+    @Query("SELECT * FROM lyrics WHERE songId = :songId")
+    fun observeLyrics(songId: Long): Flow<LyricsEntity?>
+
     @Query("DELETE FROM lyrics WHERE songId = :songId")
     suspend fun deleteLyrics(songId: Long)
 
     @Query("DELETE FROM lyrics")
     suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM lyrics")
+    suspend fun countAll(): Int
+
+    @Query("SELECT songId FROM lyrics WHERE songId IN (:songIds)")
+    suspend fun getExistingSongIds(songIds: List<Long>): List<Long>
 
     @Query("SELECT * FROM lyrics")
     suspend fun getAll(): List<LyricsEntity>

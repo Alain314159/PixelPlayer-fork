@@ -1686,6 +1686,7 @@ interface MusicDao {
             disc_number = :discNumber
         WHERE id = :songId
     """)
+    @Query("UPDATE songs SET title = :title, artist_name = :artist, album_name = :album, genre = :genre, track_number = :trackNumber WHERE id = :songId")
     suspend fun updateSongMetadata(
         songId: Long,
         title: String,
@@ -1697,6 +1698,7 @@ interface MusicDao {
         genre: String?,
         trackNumber: Int,
         discNumber: Int?
+        trackNumber: Int
     )
 
     @Transaction

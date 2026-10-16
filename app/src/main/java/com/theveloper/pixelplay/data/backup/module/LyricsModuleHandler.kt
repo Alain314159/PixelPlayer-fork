@@ -24,7 +24,7 @@ class LyricsModuleHandler @Inject constructor(
     }
 
     override suspend fun countEntries(): Int = withContext(Dispatchers.IO) {
-        lyricsDao.getAll().size
+        lyricsDao.countAll()
     }
 
     override suspend fun snapshot(): String = export()

@@ -183,6 +183,7 @@ object AppModule {
             PixelPlayDatabase.MIGRATION_40_41,
             PixelPlayDatabase.MIGRATION_41_42,
             PixelPlayDatabase.MIGRATION_42_43
+            PixelPlayDatabase.MIGRATION_24_25
         )
             .addCallback(PixelPlayDatabase.createRuntimeArtifactsCallback())
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
@@ -392,6 +393,7 @@ object AppModule {
         playlistPreferencesRepository: PlaylistPreferencesRepository,
         searchHistoryDao: SearchHistoryDao,
         musicDao: MusicDao,
+        lyricsDao: LyricsDao,
         lyricsRepository: LyricsRepository,
         telegramDao: com.theveloper.pixelplay.data.database.TelegramDao,
         telegramCacheManager: Lazy<com.theveloper.pixelplay.data.telegram.TelegramCacheManager>,
@@ -408,6 +410,7 @@ object AppModule {
             playlistPreferencesRepository = playlistPreferencesRepository,
             searchHistoryDao = searchHistoryDao,
             musicDao = musicDao,
+            lyricsDao = lyricsDao,
             lyricsRepository = lyricsRepository,
             telegramDao = telegramDao,
             telegramCacheManagerProvider = telegramCacheManager,
