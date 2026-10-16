@@ -485,10 +485,18 @@ interface MusicDao {
         applyDirectoryFilter: Boolean
     ): Flow<List<SongEntity>>
 
-    @Query("SELECT * FROM songs WHERE album_id = :albumId ORDER BY disc_number ASC, track_number ASC")
+    // BUG FIX (user-reported: slow album detail): previously this was `SELECT *` which loaded
+    // the entire `lyrics` column for every song in the album. For a 20-track album with
+    // synced LRC lyrics (~10-50KB per song), this transferred ~200KB-1MB of lyrics data
+    // into a CursorWindow that the AlbumDetailScreen then discarded (it only needs the
+    // song list, not lyrics). Switched to SONG_LIST_PROJECTION which sets lyrics=NULL.
+    @Query("SELECT " + SONG_LIST_PROJECTION + " FROM songs WHERE album_id = :albumId ORDER BY disc_number ASC, track_number ASC")
     fun getSongsByAlbumId(albumId: Long): Flow<List<SongEntity>>
 
-    @Query("SELECT * FROM songs WHERE artist_id = :artistId ORDER BY title ASC")
+    // BUG FIX (user-reported: slow artist detail): same as above — `SELECT *` loaded lyrics
+    // for every song by the artist. An artist with 100 songs would transfer ~1-5MB of lyrics
+    // data that the ArtistDetailScreen immediately discarded. Now uses SONG_LIST_PROJECTION.
+    @Query("SELECT " + SONG_LIST_PROJECTION + " FROM songs WHERE artist_id = :artistId ORDER BY title ASC")
     fun getSongsByArtistId(artistId: Long): Flow<List<SongEntity>>
 
     @Query("""
@@ -505,7 +513,7 @@ interface MusicDao {
     ): Flow<List<SongEntity>>
 
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (title LIKE '%' || :query || '%' ESCAPE '\' OR artist_name LIKE '%' || :query || '%' ESCAPE '\')
         ORDER BY title ASC
@@ -605,7 +613,7 @@ interface MusicDao {
      * Uses SQLite RANDOM() for true randomness.
      */
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         ORDER BY RANDOM()
         LIMIT :limit
@@ -629,7 +637,7 @@ interface MusicDao {
     ): SongEntity?
 
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
     """)
     fun getAllSongs(
@@ -766,7 +774,7 @@ interface MusicDao {
      * Room auto-generates the PagingSource implementation.
      */
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
             :filterMode = 0
@@ -1021,7 +1029,7 @@ interface MusicDao {
      * Note: ESCAPE '\' is required so callers must escape :query with SqlLikeEscaper.
      */
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND title LIKE '%' || :query || '%' ESCAPE '\'
         ORDER BY title ASC
@@ -1039,7 +1047,7 @@ interface MusicDao {
      * Note: ESCAPE '\' is required so callers must escape :query with SqlLikeEscaper.
      */
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (title LIKE '%' || :query || '%' ESCAPE '\' OR artist_name LIKE '%' || :query || '%' ESCAPE '\')
         ORDER BY title ASC
@@ -1093,7 +1101,7 @@ interface MusicDao {
      * Returns a PagingSource for songs in a specific genre.
      */
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR parent_directory_path IN (:allowedParentDirs))
         AND genre LIKE :genreName
         ORDER BY title ASC
@@ -1568,7 +1576,7 @@ interface MusicDao {
     // --- Genre Queries ---
     // Example: Get all songs for a specific genre
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND genre LIKE :genreName
         ORDER BY title ASC
@@ -1585,7 +1593,7 @@ interface MusicDao {
     // for genre names. All six arms use LIKE so that "rock" matches "Rock", "Rock,Pop",
     // "Rock, Pop", "Pop,Rock", "Pop, Rock", and "Pop,Rock,Jazz".
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (
             genre LIKE :genreName
@@ -1609,7 +1617,7 @@ interface MusicDao {
     ): Flow<List<SongEntity>>
 
     @Query("""
-        SELECT * FROM songs
+        SELECT id, title, artist_name, artist_id, album_artist, album_name, album_id, content_uri_string, album_art_uri_string, duration, genre, file_path, parent_directory_path, is_favorite, NULL AS lyrics, track_number, disc_number, year, date_added, mime_type, bitrate, sample_rate, telegram_chat_id, telegram_file_id, artists_json, source_type FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
         AND (genre IS NULL OR genre = '')
         ORDER BY title ASC
