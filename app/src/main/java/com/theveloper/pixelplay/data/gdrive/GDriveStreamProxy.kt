@@ -199,6 +199,20 @@ class GDriveStreamProxy @Inject constructor(
                                 response = withContext(Dispatchers.IO) {
                                     okHttpClient.newCall(retryRequest.build()).execute()
                                 }
+                            } else {
+                                // BUG FIX: previously, if refreshAccessToken() failed we fell
+                                // through to `response.use { upstream -> ... }` with `response`
+                                // still pointing to the already-closed 401 response (closed on
+                                // line 184 above). Calling .body on a closed Response throws
+                                // IllegalStateException("response is closed"). The catch below
+                                // swallows it, but the user sees a generic 500 error instead of
+                                // a clear 'auth failed' message. Respond 401 to the client and
+                                // bail out instead.
+                                call.respond(
+                                    HttpStatusCode.Unauthorized,
+                                    "GDrive token refresh failed: ${refreshResult.exceptionOrNull()?.message ?: "unknown"}"
+                                )
+                                return@get
                             }
                         }
 
