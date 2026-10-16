@@ -155,7 +155,7 @@ internal fun MiniPlayerContentInternal(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(LocalMaterialTheme.current.onPrimary)
+                .background(LocalMaterialTheme.current.primaryContainer)
                 .clickable(
                     interactionSource = previousInteraction,
                     indication = miniPlayerIndication,
@@ -169,7 +169,7 @@ internal fun MiniPlayerContentInternal(
             Icon(
                 imageVector = Icons.Rounded.SkipPrevious,
                 contentDescription = stringResource(R.string.common_previous_track),
-                tint = LocalMaterialTheme.current.primary,
+                tint = LocalMaterialTheme.current.onPrimaryContainer,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -205,7 +205,7 @@ internal fun MiniPlayerContentInternal(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(LocalMaterialTheme.current.onPrimary)
+                .background(LocalMaterialTheme.current.primaryContainer)
                 .clickable(
                     interactionSource = nextInteraction,
                     indication = miniPlayerIndication,
@@ -216,7 +216,7 @@ internal fun MiniPlayerContentInternal(
             Icon(
                 imageVector = Icons.Rounded.SkipNext,
                 contentDescription = stringResource(R.string.common_next_track),
-                tint = LocalMaterialTheme.current.primary,
+                tint = LocalMaterialTheme.current.onPrimaryContainer,
                 modifier = Modifier.size(22.dp)
             )
         }
