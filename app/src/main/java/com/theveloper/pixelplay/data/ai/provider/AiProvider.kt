@@ -10,7 +10,7 @@ enum class AiProvider(val displayName: String, val requiresApiKey: Boolean, val 
     MISTRAL("Mistral", requiresApiKey = true),
     NVIDIA("NVIDIA NIM", requiresApiKey = true),
     KIMI("Kimi (Moonshot)", requiresApiKey = true),
-    GLM("Zhipu GLM", requiresApiKey = true),
+    GLM("Z.ai (GLM)", requiresApiKey = true),
     OPENAI("OpenAI", requiresApiKey = true),
     OPENROUTER("OpenRouter", requiresApiKey = true),
     OLLAMA("Ollama", requiresApiKey = true),

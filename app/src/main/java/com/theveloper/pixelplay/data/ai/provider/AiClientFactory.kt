@@ -54,9 +54,13 @@ class AiClientFactory @Inject constructor() {
             )
             AiProvider.GLM -> GenericOpenAiClient(
                 apiKey = apiKey,
+                // Z.ai (Zhipu) — official OpenAI-compatible endpoint.
+                // Models: glm-4.6 (latest flagship), glm-4.5-air (lightweight),
+                // glm-4-flash (free tier), glm-4-flashx (faster free tier).
+                // Get API key at https://open.bigmodel.cn/usercenter/apikeys
                 baseUrl = "https://open.bigmodel.cn/api/paas/v4",
-                defaultModelId = "glm-4",
-                providerName = "Zhipu GLM"
+                defaultModelId = "glm-4-flash",
+                providerName = "Z.ai (GLM)"
             )
             AiProvider.OPENAI -> GenericOpenAiClient(
                 apiKey = apiKey,
