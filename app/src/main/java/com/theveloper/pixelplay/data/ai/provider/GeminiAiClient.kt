@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 class GeminiAiClient(private val apiKey: String) : AiClient {
 
     companion object {
-        private const val DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+        private const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
@@ -273,11 +273,14 @@ class GeminiAiClient(private val apiKey: String) : AiClient {
     }
 
     private fun getDefaultModels(): List<String> {
+        // Replaced non-existent model names (gemini-3.1-flash-lite, gemini-3.5-flash,
+        // gemini-3.1-pro-preview) with the actual current Gemini model lineup.
+        // The previous list always 404'd on first request and burned API quota on retry.
         return listOf(
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.1-pro-preview",
-            "gemini-flash-latest"
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
         )
     }
 }

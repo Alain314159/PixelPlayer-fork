@@ -145,34 +145,40 @@ class GenericOpenAiClient(
                     .addHeader("Authorization", "Bearer $apiKey")
                     .get()
                     .build()
-                
-                val response = client.newCall(request).execute()
-                
-                if (!response.isSuccessful) {
-                    return@withContext listOf(defaultModelId)
+
+                // BUG FIX: previously this was `val response = client.newCall(request).execute()`
+                // without .use {}. On the success path, response.body.string() closes the body,
+                // but on the failure path (!response.isSuccessful) the body was never read nor
+                // closed, leaking the connection. Over time this exhausts the OkHttp connection
+                // pool and all API calls fail with ConnectionPoolTimeoutException.
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext listOf(defaultModelId)
+                    }
+                    val responseBody = response.body.string()
+                    val modelsResponse = json.decodeFromString<ModelsResponse>(responseBody)
+                    modelsResponse.data.map { it.id }.let { UnifiedModelFilter.filterChatModels(it) }
                 }
-                
-                val responseBody = response.body.string()
-                val modelsResponse = json.decodeFromString<ModelsResponse>(responseBody)
-                modelsResponse.data.map { it.id }.let { UnifiedModelFilter.filterChatModels(it) }
             } catch (e: Exception) {
                 listOf(defaultModelId)
             }
         }
     }
-    
+
     override suspend fun validateApiKey(apiKey: String): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // Try a simple models list check as validation
+                // Try a simple models list check as validation.
+                // BUG FIX: same connection-leak as getAvailableModels — now uses .use {}
                 val request = Request.Builder()
                     .url("${baseUrl.trimEnd('/')}/models")
                     .addHeader("Authorization", "Bearer $apiKey")
                     .get()
                     .build()
-                
-                val response = client.newCall(request).execute()
-                response.isSuccessful
+
+                client.newCall(request).execute().use { response ->
+                    response.isSuccessful
+                }
             } catch (e: Exception) {
                 false
             }
