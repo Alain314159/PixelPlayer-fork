@@ -146,23 +146,73 @@ class AlbumGroupingUtilsTest {
         assertThat(displayArtist).isEqualTo("The Weeknd & Justice")
     }
 
+    @Test
+    fun `songs with same albumId but different album names produce different grouping keys`() {
+        // Simulates the scenario where MediaStore labels all songs under "Music"
+        // (same albumId) but the user renames them to proper album titles.
+        val songA = testSong(
+            artistName = "Michael Jackson",
+            albumArtist = null,
+            albumName = "Thriller",
+            albumId = 42L,
+            parentDirectoryPath = "/storage/emulated/0/Music"
+        )
+        val songB = testSong(
+            artistName = "The Beatles",
+            albumArtist = null,
+            albumName = "Abbey Road",
+            albumId = 42L,
+            parentDirectoryPath = "/storage/emulated/0/Music"
+        )
+
+        val keyA = buildAlbumGroupingKey(songA)
+        val keyB = buildAlbumGroupingKey(songB)
+
+        // Different album names must produce different keys even with the same albumId
+        assertThat(keyA).isNotEqualTo(keyB)
+        assertThat(keyA.normalizedTitle).isEqualTo("thriller")
+        assertThat(keyB.normalizedTitle).isEqualTo("abbey road")
+    }
+
+    @Test
+    fun `songs with same album name and same directory produce same grouping key`() {
+        val songA = testSong(
+            artistName = "Michael Jackson",
+            albumArtist = null,
+            albumName = "Thriller",
+            albumId = 42L,
+            parentDirectoryPath = "/storage/emulated/0/Music/Michael Jackson"
+        )
+        val songB = testSong(
+            artistName = "Michael Jackson",
+            albumArtist = null,
+            albumName = "Thriller",
+            albumId = 42L,
+            parentDirectoryPath = "/storage/emulated/0/Music/Michael Jackson",
+            songId = 2L
+        )
+
+        assertThat(buildAlbumGroupingKey(songA)).isEqualTo(buildAlbumGroupingKey(songB))
+    }
+
     private fun testSong(
         artistName: String,
         albumArtist: String?,
         albumArtUriString: String? = null,
         parentDirectoryPath: String = "/music/default",
         albumName: String = "Hurry Up Tomorrow",
-        albumId: Long = 42L
+        albumId: Long = 42L,
+        songId: Long = albumId
     ): SongEntity {
         return SongEntity(
-            id = albumId,
+            id = songId,
             title = "Track",
             artistName = artistName,
             artistId = 1L,
             albumArtist = albumArtist,
             albumName = albumName,
             albumId = albumId,
-            contentUriString = "content://media/$albumId",
+            contentUriString = "content://media/$songId",
             albumArtUriString = albumArtUriString,
             duration = 180_000L,
             genre = null,

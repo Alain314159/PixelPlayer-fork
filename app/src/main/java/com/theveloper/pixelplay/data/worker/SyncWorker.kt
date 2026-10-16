@@ -536,6 +536,10 @@ constructor(
         val allCrossRefs = mutableListOf<SongArtistCrossRef>()
         val artistTrackCounts = mutableMapOf<Long, Int>()
         val albumMap = mutableMapOf<AlbumGroupingKey, Long>()
+        // Reverse map: tracks which album ID is already claimed by which
+        // grouping key so we can detect collisions when different album names
+        // share the same MediaStore album ID (e.g. all tagged "Music").
+        val albumIdOwner = mutableMapOf<Long, AlbumGroupingKey>()
         val artistSplitCache = mutableMapOf<String, List<String>>()
         val correctedSongs = ArrayList<SongEntity>(songs.size)
 
@@ -543,7 +547,9 @@ constructor(
             .sortedBy { it.id }
             .forEach { album ->
                 buildAlbumGroupingKeys(album).forEach { key ->
-                    albumMap.putIfAbsent(key, album.id)
+                    if (albumMap.putIfAbsent(key, album.id) == null) {
+                        albumIdOwner.putIfAbsent(album.id, key)
+                    }
                 }
             }
 
@@ -594,7 +600,22 @@ constructor(
 
             // --- Album Logic ---
             val albumKey = buildAlbumGroupingKey(song)
-            val finalAlbumId = albumMap.getOrPut(albumKey) { song.albumId }
+            val finalAlbumId = albumMap.getOrPut(albumKey) {
+                val proposedId = song.albumId
+                val ownerKey = albumIdOwner[proposedId]
+                if (ownerKey != null && ownerKey != albumKey) {
+                    // This MediaStore album ID is already used by a different
+                    // album grouping (e.g. two albums that MediaStore both called
+                    // "Music").  Mint a deterministic synthetic ID so each
+                    // distinct album name gets its own album entity.
+                    val syntheticId = deriveSyntheticAlbumId(albumKey, albumIdOwner)
+                    albumIdOwner[syntheticId] = albumKey
+                    syntheticId
+                } else {
+                    albumIdOwner[proposedId] = albumKey
+                    proposedId
+                }
+            }
 
             // Build serialized artists JSON for efficient loading without JOINs
             val artistRefsForJson = allArtistsForSong.mapIndexed { index, name ->
@@ -1080,6 +1101,23 @@ constructor(
     }
 
     /**
+     * Checks if an album name looks like a generic folder/category name that
+     * Android's MediaStore may have used as a fallback when it failed to read
+     * proper ID3/Vorbis tags from the file.  When this returns `true` we
+     * force a metadata-augmentation pass so actual embedded tags are read.
+     */
+    private fun looksLikeGenericAlbumName(albumName: String): Boolean {
+        val lower = albumName.trim().lowercase()
+        return lower == "music" ||
+            lower == "songs" ||
+            lower == "audio" ||
+            lower == "media" ||
+            lower == "downloads" ||
+            lower == "recordings" ||
+            lower == "record"
+    }
+
+    /**
      * Process a single song's raw data into a SongEntity. This is the CPU/IO intensive work that
      * benefits from parallelization.
      */
@@ -1127,7 +1165,11 @@ constructor(
                         // MediaStore uses "<unknown>" for unreadable fields;
                         // our normalization may produce "Unknown Artist"/"Unknown Album".
                         isDefaultMetadata(raw.artist) ||
-                        isDefaultMetadata(raw.album)
+                        isDefaultMetadata(raw.album) ||
+                        // Some devices/ROMs return folder names (e.g. "Music") as the
+                        // album when they fail to parse embedded tags.  Read the file
+                        // to get the real album name in those cases.
+                        looksLikeGenericAlbumName(raw.album)
 
         if (shouldAugmentMetadata) {
             val file = java.io.File(raw.filePath)
@@ -1213,6 +1255,47 @@ constructor(
         return ids
     }
 
+    /**
+     * Fetches all file paths currently known to MediaStore.
+     * Used to identify new files that need scanning.
+     */
+    private fun fetchMediaStoreFilePaths(): Set<String> {
+        val paths = HashSet<String>()
+        val projection = arrayOf(MediaStore.Audio.Media.DATA)
+        val (selection, selectionArgs) = buildLocalAudioSelection(minSongDurationMs)
+        
+        contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )?.use { cursor ->
+            val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+            if (dataCol >= 0) {
+                while (cursor.moveToNext()) {
+                    cursor.getString(dataCol)?.let { paths.add(it) }
+                }
+            }
+        }
+        return paths
+    }
+
+    /**
+     * Produces a deterministic album ID from a grouping key so that the same
+     * logical album gets a stable ID across syncs.  The ID is placed in a high
+     * range (offset by [SYNTHETIC_ALBUM_ID_OFFSET]) to avoid colliding with
+     * real MediaStore album IDs which are typically small positive numbers.
+     */
+    private fun deriveSyntheticAlbumId(
+        key: AlbumGroupingKey,
+        usedIds: Map<Long, *>
+    ): Long {
+        var id = "${key.normalizedTitle}\u0000${key.identity}"
+            .hashCode().toLong().absoluteValue + SYNTHETIC_ALBUM_ID_OFFSET
+        // In the unlikely event of a hash collision, increment until unique
+        while (usedIds.containsKey(id)) id++
+        return id
     companion object {
         const val WORK_NAME = "com.theveloper.pixelplay.data.worker.SyncWorker"
         // Distinct unique name so background maintenance never feeds the WORK_NAME-bound
@@ -1220,6 +1303,7 @@ constructor(
         const val PERIODIC_MAINTENANCE_WORK_NAME =
             "com.theveloper.pixelplay.data.worker.SyncWorker.PeriodicMaintenance"
         private const val TAG = "SyncWorker"
+        private const val SYNTHETIC_ALBUM_ID_OFFSET = 8_000_000_000_000L
         const val INPUT_FORCE_METADATA = "input_force_metadata"
         const val INPUT_RUN_MAINTENANCE = "input_run_maintenance"
         const val INPUT_SYNC_MODE = "input_sync_mode"
