@@ -393,7 +393,12 @@ class DualPlayerEngine @Inject constructor(
                     // Fix: check that we're not already playing before setting playWhenReady.
                     // Also, don't re-request focus here — we already have it (audioFocusRequest
                     // was set when we first requested it, even if DELAYED).
-                    if (!playerA.isPlaying && playerA.playbackState != Player.STATE_IDLE) {
+                    if (!playerA.isPlaying) {
+                        // BUG FIX (#2608): after a notification takes audio focus, the player
+                        // might be in STATE_IDLE. Prepare it before resuming.
+                        if (playerA.playbackState == Player.STATE_IDLE) {
+                            playerA.prepare()
+                        }
                         playerA.playWhenReady = true
                         if (transitionRunning) playerB?.playWhenReady = true
                     }
