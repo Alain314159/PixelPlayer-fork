@@ -48,26 +48,33 @@ class GeminiModelService @Inject constructor(
     private suspend fun makeModelsListRequest(apiKey: String): List<GeminiModel> {
         return withContext(Dispatchers.IO) {
             try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
-                val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                // BUG FIX: migrated from raw HttpURLConnection to OkHttp for consistency
+                // with the rest of the codebase (GeminiAiClient uses OkHttp, all cloud
+                // repositories use OkHttp). HttpURLConnection doesn't have connection
+                // pooling, retry, or interceptor support — OkHttp gives all three.
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val request = okhttp3.Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
+                    .get()
+                    .build()
 
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 10000
-                connection.readTimeout = 10000
+                client.newCall(request).execute().use { response ->
+                    val apiModels = if (response.isSuccessful) {
+                        val responseBody = response.body?.string()
+                        if (responseBody != null) parseModelsResponse(responseBody) else emptyList()
+                    } else emptyList()
 
-                val responseCode = connection.responseCode
-                val apiModels = if (responseCode == 200) {
-                    val response = connection.inputStream.bufferedReader().use { it.readText() }
-                    parseModelsResponse(response)
-                } else emptyList()
-
-                val defaults = getDefaultModels()
-                (apiModels + defaults).distinctBy { it.name }.sortedWith(
-                    compareBy<GeminiModel> { model ->
-                        val preferred = defaults.map { it.name }
-                        preferred.indexOf(model.name).takeIf { it >= 0 } ?: Int.MAX_VALUE
-                    }.thenBy { it.displayName.lowercase() }
-                )
+                    val defaults = getDefaultModels()
+                    (apiModels + defaults).distinctBy { it.name }.sortedWith(
+                        compareBy<GeminiModel> { model ->
+                            val preferred = defaults.map { it.name }
+                            preferred.indexOf(model.name).takeIf { it >= 0 } ?: Int.MAX_VALUE
+                        }.thenBy { it.displayName.lowercase() }
+                    )
+                }
             } catch (e: Exception) {
                 getDefaultModels()
             }
