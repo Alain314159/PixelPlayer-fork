@@ -889,16 +889,19 @@ class MusicService : MediaLibraryService() {
             }
         }
 
+        // BUG FIX (H.3): previously the MediaLibrarySession was built directly on
+        // engine.masterPlayer, which is a "live" reference that gets swapped between
+        // playerA and playerB during every crossfade transition. Listeners attached by
+        // the session (for onMediaItemTransition, onPlayWhenReadyChanged, etc.) were
+        // silently orphaned after each swap, causing the session to appear "stuck" until
+        // the user manually seeked. Wrapping in ForwardingPlayer via the holder keeps the
+        // session's listener registration stable across swaps — DualPlayerEngine calls
+        // forwardingPlayerHolder.swap(newMaster) on every crossfade.
+        val sessionPlayer = engine.sessionPlayer
+
         mediaSession = MediaLibrarySession.Builder(
             this,
-            // BUG FIX (H.3): previously the MediaLibrarySession was built directly on
-            // engine.masterPlayer, which is a "live" reference that gets swapped between
-            // playerA and playerB during every crossfade transition. Listeners attached by
-            // the session (for onMediaItemTransition, onPlayWhenReadyChanged, etc.) were
-            // silently orphaned after each swap, causing the session to appear "stuck" until
-            // the user manually seeked. Wrapping in ForwardingPlayer keeps the session's
-            // listener registration stable across swaps.
-            androidx.media3.common.ForwardingPlayer(engine.masterPlayer),
+            sessionPlayer,
             callback
         )
             .setSessionActivity(getOpenAppPendingIntent())

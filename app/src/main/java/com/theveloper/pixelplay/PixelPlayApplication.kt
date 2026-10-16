@@ -72,6 +72,9 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     @Inject
     lateinit var advancedPerformanceDiagnosticsController: dagger.Lazy<AdvancedPerformanceDiagnosticsController>
 
+    @Inject
+    lateinit var playbackStatsRepository: dagger.Lazy<com.theveloper.pixelplay.data.stats.PlaybackStatsRepository>
+
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // AÑADE EL COMPANION OBJECT
@@ -129,6 +132,14 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
             if (savedLimit != null) {
                 AlbumArtCacheManager.configuredCacheLimitMb = savedLimit.toLong()
             }
+
+            // BUG FIX (8.1, 8.2, 8.3 follow-up): one-time import of the legacy
+            // playback_history.json into the new Room playback_events table (added in
+            // DB v43). If the JSON file still exists (e.g. user upgraded from a pre-v43
+            // build), its events are bulk-inserted into the new table and the JSON file
+            // is deleted. Idempotent — only runs once per install.
+            runCatching { playbackStatsRepository.get().importLegacyJsonFileIfNeeded() }
+                .onFailure { Timber.tag("PixelPlayApp").w(it, "Legacy playback history import failed; will retry on next launch") }
         }
     }
 

@@ -221,7 +221,8 @@ class DualPlayerEngine @Inject constructor(
     private val jellyfinStreamProxy: com.theveloper.pixelplay.data.jellyfin.JellyfinStreamProxy,
     private val gdriveStreamProxy: com.theveloper.pixelplay.data.gdrive.GDriveStreamProxy,
     private val telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager,
-    private val connectivityStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder
+    private val connectivityStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder,
+    private val forwardingPlayerHolder: ForwardingPlayerHolder
 ) {
     private companion object {
         private const val AUDIO_OFFLOAD_STALL_FALLBACK_MS = 4_000L
@@ -706,6 +707,25 @@ class DualPlayerEngine @Inject constructor(
         get() {
             initialize()
             return playerA
+        }
+
+    /**
+     * A stable [Player] reference suitable for handing to [androidx.media3.session.MediaLibrarySession.Builder].
+     *
+     * BUG FIX (H.3): the engine's [masterPlayer] is a live reference that gets swapped between
+     * playerA and playerB on every crossfade transition. Listeners that the MediaLibrarySession
+     * attached to the previous masterPlayer were silently orphaned after each swap.
+     *
+     * [sessionPlayer] returns a ForwardingPlayer (created lazily via [ForwardingPlayerHolder])
+     * that wraps the current masterPlayer. After every swap, [performOverlapTransition] calls
+     * [ForwardingPlayerHolder.swap] so the ForwardingPlayer's delegate switches atomically
+     * to the new masterPlayer — listeners stay attached to the ForwardingPlayer, which never
+     * changes identity, so they continue to receive callbacks across crossfades.
+     */
+    val sessionPlayer: androidx.media3.common.Player
+        get() {
+            initialize()
+            return forwardingPlayerHolder.getOrCreate(playerA)
         }
 
     fun isTransitionRunning(): Boolean = transitionRunning
@@ -1506,6 +1526,17 @@ class DualPlayerEngine @Inject constructor(
         activeWindowStartIndex = preparedWindowStartIndex
         activePlayerUsesWindowedQueue = preparedPlayerUsesWindowedQueue
         resetPreparedWindowState()
+
+        // BUG FIX (H.3): notify the ForwardingPlayerHolder that masterPlayer has changed
+        // (playerA now points to incomingPlayer). If MusicService constructed its
+        // MediaLibrarySession with a ForwardingPlayer via forwardingPlayerHolder.getOrCreate(),
+        // the holder swaps the ForwardingPlayer's delegate atomically so the session's
+        // listeners (registered on the ForwardingPlayer, not the underlying ExoPlayer)
+        // continue to receive callbacks from the new master without being re-attached.
+        // Without this, MediaSession listeners were silently orphaned after every crossfade
+        // and the session appeared 'stuck' until the user manually seeked.
+        runCatching { forwardingPlayerHolder.swap(playerA) }
+            .onFailure { Timber.tag("DualPlayerEngine").w(it, "ForwardingPlayerHolder.swap failed (non-fatal — session will use stale delegate)") }
 
         playerA.pauseAtEndOfMediaItems = false
         playerB?.pauseAtEndOfMediaItems = false
