@@ -305,11 +305,17 @@ class SyncManager @Inject constructor(
     private fun observeAppForeground() {
         // ProcessLifecycleOwner is application-scoped; the observer and this @Singleton both
         // live for the whole process, so registering once here cannot leak.
-        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                maybeRunForegroundCatchUpSync()
-            }
-        })
+        // BUG FIX (#2594): 'Method addObserver must be called on the main thread.'
+        // SyncManager is a @Singleton that may be instantiated by Hilt on a background thread.
+        // ProcessLifecycleOwner.get().lifecycle.addObserver() must be called on the main thread.
+        // Fix: post to the main looper to ensure main-thread execution.
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    maybeRunForegroundCatchUpSync()
+                }
+            })
+        }
     }
 
     /**

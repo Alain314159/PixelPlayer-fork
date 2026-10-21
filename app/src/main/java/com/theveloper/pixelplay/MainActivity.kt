@@ -612,6 +612,16 @@ class MainActivity : ComponentActivity() {
     private fun MainUI(playerViewModel: PlayerViewModel, navController: NavHostController) {
         Trace.beginSection("MainActivity.MainUI")
 
+        // BUG FIX (#2684, #2640): Back button should close the player sheet first
+        // before navigating back or exiting the app.
+        val sheetState by playerViewModel.sheetState.collectAsStateWithLifecycle()
+        
+        androidx.activity.compose.BackHandler(
+            enabled = sheetState == com.theveloper.pixelplay.presentation.components.PlayerSheetState.EXPANDED
+        ) {
+            playerViewModel.collapsePlayerSheet()
+        }
+
         val commonNavItems = remember {
             persistentListOf(
                 BottomNavItem("Home", R.string.nav_bar_home, R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
