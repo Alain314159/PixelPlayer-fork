@@ -1104,7 +1104,28 @@ object LyricsUtils {
 }
 
 private fun stripLeadingLyricsDocumentNoise(value: String): String {
-    return value.trimStart { char ->
+    // BUG FIX (#2782): Strip invisible characters that prevent Arabic/Persian
+    // letter joining. Some LRC editors insert ZWNJ (U+200C) and ZWJ (U+200D)
+    // between letters, which prevents them from joining correctly in Arabic
+    // and Persian scripts. Also strip LRM (U+200E), RLM (U+200F), and
+    // other directional marks that can cause rendering issues.
+    val cleaned = value
+        .replace("\u200C", "")  // ZWNJ — Zero Width Non-Joiner
+        .replace("\u200D", "")  // ZWJ — Zero Width Joiner
+        .replace("\u200E", "")  // LRM — Left-to-Right Mark
+        .replace("\u200F", "")  // RLM — Right-to-Left Mark
+        .replace("\u202A", "")  // LRE — Left-to-Right Embedding
+        .replace("\u202B", "")  // RLE — Right-to-Left Embedding
+        .replace("\u202C", "")  // PDF — Pop Directional Formatting
+        .replace("\u202D", "")  // LRO — Left-to-Right Override
+        .replace("\u202E", "")  // RLO — Right-to-Left Override
+        .replace("\u2060", "")  // WJ — Word Joiner
+        .replace("\u2061", "")  // Function Application
+        .replace("\u2062", "")  // Invisible Times
+        .replace("\u2063", "")  // Invisible Separator
+        .replace("\u2064", "")  // Invisible Plus
+
+    return cleaned.trimStart { char ->
         char.isWhitespace() ||
             char == '\uFEFF' ||
             Character.getType(char).toByte() == Character.FORMAT

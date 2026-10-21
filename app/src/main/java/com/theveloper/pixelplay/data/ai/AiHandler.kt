@@ -33,6 +33,20 @@ class AiHandler @Inject constructor(
     // atomic reads + writes for the typical get/put usage pattern here.
     private val providerCooldowns = java.util.concurrent.ConcurrentHashMap<AiProvider, Long>()
     private val COOLDOWN_DURATION_MS = 1000L * 60 * 5 // 5 minutes
+    @Volatile private var lastPrimaryProvider: AiProvider? = null
+
+    /**
+     * Clear all provider cooldowns. Called when the user switches AI providers
+     * to ensure the new provider isn't still on cooldown from a previous failure.
+     *
+     * BUG FIX (#2752): 'Unable to switch AI providers' — when switching from
+     * provider A (which had failed and was on cooldown) to provider B, the
+     * cooldown on A would prevent fallback to A if B also failed. Clearing
+     * cooldowns on provider switch gives the new primary provider a fresh start.
+     */
+    fun clearCooldowns() {
+        providerCooldowns.clear()
+    }
 
     // Cache TTL: 30 minutes — prevents stale results from being served indefinitely
     private val CACHE_TTL_MS = 1000L * 60 * 30
@@ -195,6 +209,17 @@ class AiHandler @Inject constructor(
         }
 
         val providersToTry = com.theveloper.pixelplay.data.ai.provider.AiProviderSupport.buildProviderChain(userProvider)
+
+        // BUG FIX (#2752): clear cooldowns when the user's primary provider changes.
+        // This ensures that switching to a new provider gives it a fresh start —
+        // it won't be blocked by a cooldown that was set during a previous session
+        // with a different provider.
+        if (lastPrimaryProvider != null && lastPrimaryProvider != userProvider) {
+            Timber.tag("AiHandler").i("Primary provider changed from $lastPrimaryProvider to $userProvider — clearing cooldowns")
+            providerCooldowns.clear()
+        }
+        lastPrimaryProvider = userProvider
+
         val failedProviders = mutableListOf<String>()
         val now = System.currentTimeMillis()
 
