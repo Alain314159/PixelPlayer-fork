@@ -1331,7 +1331,7 @@ constructor(
         const val OUTPUT_TOTAL_SONGS = "output_total_songs"
         // Number of Telegram songs processed per DB flush. Keeps peak memory bounded
         // regardless of channel size (e.g. 65k songs → ~130 flushes of 500 each).
-        private const val TELEGRAM_SYNC_CHUNK_SIZE = 500
+        private const val TELEGRAM_SYNC_CHUNK_SIZE = 200  // BUG FIX (#2843, #2811): reduced from 500 to avoid OOM with large Telegram channels
 
         private const val NETEASE_SONG_ID_OFFSET = 3_000_000_000_000L
         private const val NETEASE_ALBUM_ID_OFFSET = 4_000_000_000_000L
