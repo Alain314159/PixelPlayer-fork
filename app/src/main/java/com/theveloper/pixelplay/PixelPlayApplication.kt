@@ -75,7 +75,20 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     @Inject
     lateinit var playbackStatsRepository: dagger.Lazy<com.theveloper.pixelplay.data.stats.PlaybackStatsRepository>
 
-    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val startupScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+            // BUG FIX (#2682, #2687, #2685): random app crashes.
+            // Catch uncaught exceptions in the startup scope so they don't
+            // crash the app. Report to Sentry if available.
+            Timber.tag("PixelPlayApp").e(throwable, "Uncaught coroutine exception in startupScope")
+            try {
+                if (com.theveloper.pixelplay.BuildConfig.SENTRY_DSN.isNotBlank()) {
+                    io.sentry.Sentry.captureException(throwable)
+                }
+            } catch (_: Exception) { }
+        }
+    )
 
     // AÑADE EL COMPANION OBJECT
     companion object {
