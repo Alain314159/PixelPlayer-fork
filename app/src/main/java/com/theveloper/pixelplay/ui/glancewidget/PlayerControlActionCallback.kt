@@ -42,24 +42,28 @@ class PlayerControlActionCallback : ActionCallback {
         }
 
         try {
+            // BUG FIX (#2600, #2736): Widget play button doesn't work when app isn't in RAM.
+            // When the app process has been killed (cold start), context.startService() and
+            // even context.startForegroundService() fail because the app isn't running.
+            // The fix: use MediaButtonReceiver.buildMediaButtonIntent() which starts the
+            // service via Media3's proper startup path, OR use context.startForegroundService()
+            // with EXTRA_FORCE_FOREGROUND_ON_START=true from the start (not just as a fallback).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                serviceIntent.putExtra(MusicService.EXTRA_FORCE_FOREGROUND_ON_START, true)
                 try {
-                    context.startService(serviceIntent)
-                } catch (e: IllegalStateException) {
-                    Timber.tag(TAG).w(
-                        e,
-                        "startService denied in background for action %s; retrying as foreground service",
-                        action
-                    )
-                    serviceIntent.putExtra(MusicService.EXTRA_FORCE_FOREGROUND_ON_START, true)
                     context.startForegroundService(serviceIntent)
+                } catch (e: Exception) {
+                    Timber.tag(TAG).w(e, "startForegroundService failed for action $action; trying startService")
+                    try {
+                        context.startService(serviceIntent)
+                    } catch (e2: Exception) {
+                        Timber.tag(TAG).e(e2, "Both startForegroundService and startService failed for action $action")
+                    }
                 }
             } else {
                 context.startService(serviceIntent)
             }
             Timber.tag(TAG).d("Service intent sent for action: $action")
-        } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
-            Timber.tag(TAG).w(e, "Cannot start foreground service from background for action $action")
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error starting service for action $action: ${e.message}")
         }
