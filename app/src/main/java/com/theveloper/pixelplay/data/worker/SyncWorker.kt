@@ -596,21 +596,33 @@ constructor(
             }
 
             // --- Album Logic ---
-            val albumKey = buildAlbumGroupingKey(song)
-            val finalAlbumId = albumMap.getOrPut(albumKey) {
-                val proposedId = song.albumId
-                val ownerKey = albumIdOwner[proposedId]
-                if (ownerKey != null && ownerKey != albumKey) {
-                    // This MediaStore album ID is already used by a different
-                    // album grouping (e.g. two albums that MediaStore both called
-                    // "Music").  Mint a deterministic synthetic ID so each
-                    // distinct album name gets its own album entity.
-                    val syntheticId = deriveSyntheticAlbumId(albumKey, albumIdOwner)
-                    albumIdOwner[syntheticId] = albumKey
-                    syntheticId
-                } else {
-                    albumIdOwner[proposedId] = albumKey
-                    proposedId
+            // BUG FIX (#2804, #2745): use multiple grouping keys to match songs
+            // with the same album name but different albumArtist tags.
+            val albumKeys = buildAlbumGroupingKeysForSong(song)
+            val finalAlbumId = albumKeys.firstNotNullOfOrNull { key ->
+                albumMap[key]
+            } ?: run {
+                // No existing match — create new album ID using the primary key
+                val albumKey = albumKeys.first()
+                albumMap.getOrPut(albumKey) {
+                    val proposedId = song.albumId
+                    val ownerKey = albumIdOwner[proposedId]
+                    if (ownerKey != null && ownerKey != albumKey) {
+                        val syntheticId = deriveSyntheticAlbumId(albumKey, albumIdOwner)
+                        albumIdOwner[syntheticId] = albumKey
+                        // Also map fallback keys to the same album ID
+                        albumKeys.drop(1).forEach { fallbackKey ->
+                            albumMap[fallbackKey] = syntheticId
+                        }
+                        syntheticId
+                    } else {
+                        albumIdOwner[proposedId] = albumKey
+                        // Also map fallback keys to the same album ID
+                        albumKeys.drop(1).forEach { fallbackKey ->
+                            albumMap[fallbackKey] = proposedId
+                        }
+                        proposedId
+                    }
                 }
             }
 

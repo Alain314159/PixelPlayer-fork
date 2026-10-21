@@ -35,6 +35,45 @@ internal fun buildAlbumGroupingKey(song: SongEntity): AlbumGroupingKey {
     )
 }
 
+/**
+ * Generate multiple grouping keys for a song to maximize matching.
+ *
+ * BUG FIX (#2804, #2745): 'Same Named Albums show as separate albums.'
+ * Songs with the same album name but different albumArtist tags were being
+ * grouped into separate albums because the primary grouping key uses
+ * albumArtist as the identity. This generates an additional key that
+ * uses only the directory + album name (ignoring albumArtist), so songs
+ * in the same folder get grouped together regardless of albumArtist.
+ */
+internal fun buildAlbumGroupingKeysForSong(song: SongEntity): List<AlbumGroupingKey> {
+    val keys = mutableListOf<AlbumGroupingKey>()
+
+    // Primary key: uses albumArtist as identity (original behavior)
+    keys += buildAlbumGroupingKey(song)
+
+    // Fallback key: uses directory only (ignores albumArtist)
+    // This groups songs in the same folder with the same album name together
+    // even if they have different albumArtist tags (#2804, #2745)
+    if (!song.parentDirectoryPath.isNullOrBlank()) {
+        keys += AlbumGroupingKey(
+            normalizedTitle = song.albumName.normalizeMetadataTextOrEmpty()
+                .ifBlank { "Unknown Album" }
+                .lowercase(),
+            identity = "dir:${song.parentDirectoryPath.trim().lowercase()}"
+        )
+    }
+
+    // Fallback key: uses album name only (weakest match — only if no other key matches)
+    keys += AlbumGroupingKey(
+        normalizedTitle = song.albumName.normalizeMetadataTextOrEmpty()
+            .ifBlank { "Unknown Album" }
+            .lowercase(),
+        identity = "name-only"
+    )
+
+    return keys.distinct()
+}
+
 internal fun buildAlbumGroupingKeys(album: AlbumEntity): List<AlbumGroupingKey> {
     val albumKeys = mutableListOf<AlbumGroupingKey>()
 
