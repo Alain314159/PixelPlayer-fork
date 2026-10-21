@@ -9,6 +9,7 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Standard dimensions used across the app's Compose UI.
