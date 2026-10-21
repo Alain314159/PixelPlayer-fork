@@ -307,50 +307,55 @@ class PlaylistViewModel @Inject constructor(
         smartRuleKey: String? = null
     ) {
         viewModelScope.launch {
-            var savedCoverPath: String? = null
+            try {
+                var savedCoverPath: String? = null
 
-            if (coverImageUri != null) {
-                // Generate a unique ID for the image file since we don't have the playlist ID yet
-                val imageId = UUID.randomUUID().toString()
-                savedCoverPath = saveCoverImageToInternalStorage(
-                    Uri.parse(coverImageUri),
-                    imageId,
-                    cropScale,
-                    cropPanX,
-                    cropPanY
+                if (coverImageUri != null) {
+                    val imageId = UUID.randomUUID().toString()
+                    savedCoverPath = saveCoverImageToInternalStorage(
+                        Uri.parse(coverImageUri),
+                        imageId,
+                        cropScale,
+                        cropPanX,
+                        cropPanY
+                    )
+                }
+
+                val resolvedSmartRule = SmartPlaylistRule.fromStorageKey(smartRuleKey)
+                val resolvedSongIds = if (resolvedSmartRule != null) {
+                    buildSmartPlaylistSongIds(
+                        rule = resolvedSmartRule,
+                        limit = SMART_PLAYLIST_MAX_ITEMS
+                    )
+                } else {
+                    songIds
+                }
+                val resolvedSource = when {
+                    resolvedSmartRule != null && source == "LOCAL" -> "SMART"
+                    else -> source
+                }
+
+                playlistPreferencesRepository.createPlaylist(
+                    name = name,
+                    songIds = resolvedSongIds,
+                    isAiGenerated = isAiGenerated,
+                    isQueueGenerated = isQueueGenerated,
+                    coverImageUri = savedCoverPath,
+                    coverColorArgb = coverColor,
+                    coverIconName = coverIcon,
+                    coverShapeType = coverShapeType,
+                    coverShapeDetail1 = coverShapeDetail1,
+                    coverShapeDetail2 = coverShapeDetail2,
+                    coverShapeDetail3 = coverShapeDetail3,
+                    coverShapeDetail4 = coverShapeDetail4,
+                    source = resolvedSource
                 )
+                _playlistCreationEvent.emit(true)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Timber.tag("PlaylistViewModel").e(e, "Failed to create playlist")
+                _messageEvents.emit("Failed to create playlist: ${e.message ?: "unknown error"}")
             }
-
-            val resolvedSmartRule = SmartPlaylistRule.fromStorageKey(smartRuleKey)
-            val resolvedSongIds = if (resolvedSmartRule != null) {
-                buildSmartPlaylistSongIds(
-                    rule = resolvedSmartRule,
-                    limit = SMART_PLAYLIST_MAX_ITEMS
-                )
-            } else {
-                songIds
-            }
-            val resolvedSource = when {
-                resolvedSmartRule != null && source == "LOCAL" -> "SMART"
-                else -> source
-            }
-
-            playlistPreferencesRepository.createPlaylist(
-                name = name,
-                songIds = resolvedSongIds,
-                isAiGenerated = isAiGenerated,
-                isQueueGenerated = isQueueGenerated,
-                coverImageUri = savedCoverPath,
-                coverColorArgb = coverColor,
-                coverIconName = coverIcon,
-                coverShapeType = coverShapeType,
-                coverShapeDetail1 = coverShapeDetail1,
-                coverShapeDetail2 = coverShapeDetail2,
-                coverShapeDetail3 = coverShapeDetail3,
-                coverShapeDetail4 = coverShapeDetail4,
-                source = resolvedSource
-            )
-            _playlistCreationEvent.emit(true)
         }
     }
 

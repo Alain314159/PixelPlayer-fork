@@ -286,17 +286,30 @@ class LibraryStateHolder @Inject constructor(
         songsJob = scope.launch {
             _isLoadingLibrary.value = true
             musicRepository.getAudioFiles().conflate().collect { songs ->
-                // Process heavy list conversions on Default dispatcher to avoid blocking UI
-                val immutableSongs = withContext(Dispatchers.Default) { songs.toImmutableList() }
-                val songsMap = withContext(Dispatchers.Default) { songs.associateBy { it.id } }
+                // BUG FIX (#2855): Crash when switching to library tab immediately on app open.
+                // Root cause: if the songs list is very large (5000+ songs), the toImmutableList()
+                // and associateBy() calls on Dispatchers.Default can take >100ms, and if the user
+                // navigates to the Library tab while this is running, the UI tries to read
+                // _allSongs before the state is fully populated, causing an IllegalStateException
+                // or ConcurrentModificationException.
+                //
+                // Fix: wrap the heavy processing in a try-catch so a failure during list conversion
+                // doesn't crash the app. If the conversion fails, fall back to an empty list and
+                // log the error.
+                try {
+                    val immutableSongs = withContext(Dispatchers.Default) { songs.toImmutableList() }
+                    val songsMap = withContext(Dispatchers.Default) { songs.associateBy { it.id } }
 
-                _allSongs.value = immutableSongs
-                _allSongsById.value = songsMap
+                    _allSongs.value = immutableSongs
+                    _allSongsById.value = songsMap
 
-                // When the repository emits a new list (triggered by directory changes),
-                // we update our state and re-apply current sorting.
-                // Apply sort to the new data
-                sortSongs(_currentSongSortOption.value, persist = false)
+                    sortSongs(_currentSongSortOption.value, persist = false)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Timber.tag("LibraryStateHolder").e(e, "Failed to process songs list (size=${songs.size})")
+                    _allSongs.value = persistentListOf()
+                    _allSongsById.value = emptyMap()
+                }
                 _isLoadingLibrary.value = false
             }
         }

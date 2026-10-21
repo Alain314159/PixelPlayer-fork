@@ -1528,7 +1528,7 @@ constructor(
 
                 chunk.forEach { tSong ->
                     val channelName = channels[tSong.chatId]?.title ?: "Telegram Stream"
-                    val songId = -(tSong.id.hashCode().toLong().absoluteValue)
+                    val songId = stableNegativeSyntheticId(tSong.id)  // BUG FIX (#2665): was -(tSong.id.hashCode().toLong().absoluteValue) — 32-bit hash that didn't match the 64-bit FNV-1a used for actual song insertion. This caused the deletion phase to remove valid songs.
                     val finalSongId = if (songId == 0L) -1L else songId
                     syncedTelegramSongIds.add(finalSongId)
 

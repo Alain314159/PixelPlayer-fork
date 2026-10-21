@@ -164,7 +164,22 @@ internal class SheetVerticalDragGestureHandler(
     }
 
     fun onDragCancel() {
-        onDragEnd()
+        // BUG FIX (#2888): Swipe down freezes app.
+        // Previously onDragCancel called onDragEnd() which treats the partial drag
+        // as a committed gesture and reads velocityTracker on a tracker that was
+        // never cleanly ended. This can cause the snap logic to compute an invalid
+        // velocity, flipping the sheet to an unexpected state and freezing the UI.
+        //
+        // Fix: onDragCancel should re-snap to the sheet's prior committed state
+        // without consulting velocity.
+        scope.launch {
+            onAnimateSheet(
+                targetExpanded = currentSheetContentState == PlayerSheetState.EXPANDED,
+                animationSpec = androidx.compose.animation.core.tween(200),
+                velocity = 0f
+            )
+        }
+        accumulatedDragYSinceStart = 0f
     }
 }
 
