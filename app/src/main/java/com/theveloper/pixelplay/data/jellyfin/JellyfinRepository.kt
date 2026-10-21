@@ -578,6 +578,17 @@ class JellyfinRepository @Inject constructor(
             crossRefs = crossRefs,
             deletedSongIds = deletedUnifiedIds
         )
+
+        // BUG FIX (#2611): 'Jellyfin Album Art Not Updating' — after syncing, the
+        // album art URLs in the DB are the same (jellyfin_cover://<id>), but the
+        // actual image on the Jellyfin server may have changed. Coil's memory cache
+        // still holds the old image. Clear the Coil cache so the next image load
+        // fetches the updated artwork from the server.
+        try {
+            coil.Coil.imageLoader(context).memoryCache?.clear()
+        } catch (_: Exception) {
+            // Coil may not be initialized yet
+        }
     }
 
     // ─── Utility Methods ───────────────────────────────────────────────────

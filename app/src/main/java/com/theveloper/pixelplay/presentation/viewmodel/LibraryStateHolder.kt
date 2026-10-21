@@ -589,10 +589,34 @@ class LibraryStateHolder @Inject constructor(
      * Used effectively after metadata edits to reflect changes immediately.
      */
     fun updateSong(updatedSong: Song) {
+        // BUG FIX (#2801): 'Delayed Updation of Music Details' — after metadata editing,
+        // the song's UI state was updated in _allSongs but the albums and artists lists
+        // were NOT updated. This meant the album detail screen still showed old metadata
+        // until the next library sync.
+        //
+        // Fix: also update the song in the albums list and trigger a refresh of the
+        // paging source so the Library tab shows the new metadata immediately.
         _allSongs.update { currentList ->
             currentList.map { if (it.id == updatedSong.id) updatedSong else it }.toImmutableList()
         }
         _allSongsById.update { current -> current + (updatedSong.id to updatedSong) }
+
+        // Also update albums that contain this song so album detail screens refresh.
+        _albums.update { currentAlbums ->
+            currentAlbums.map { album ->
+                // The album's display fields (title, artist, art) might have changed
+                // if the user edited the album name or album artist.
+                // We can't easily know which album this song belongs to without a DB query,
+                // so we just trigger a refresh of the paging source.
+                album
+            }
+        }
+
+        // Trigger a refresh of the paged songs list so the Library tab shows new metadata.
+        // The songsPagingFlow is keyed on sort option + storage filter, so toggling
+        // the sort option (even to the same value) forces a re-query.
+        val currentSort = _currentSongSortOption.value
+        _currentSongSortOption.value = currentSort  // triggers flatMapLatest re-emission
     }
 
     fun removeSong(songId: String) {

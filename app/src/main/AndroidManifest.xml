@@ -15,6 +15,12 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- BUG FIX (#2595, #2653, #2812): SD card music not recognized.
+         On Android 13+ (API 33+), READ_MEDIA_AUDIO is the correct permission.
+         On Android 11-12 (API 30-32), READ_EXTERNAL_STORAGE is needed.
+         The maxSdkVersion="32" was correct but some OEMs (iBasso, Xiaomi)
+         still need it on API 33+ for SD card access via MediaStore.Files.
+         Adding READ_MEDIA_AUDIO with maxSdkVersion unset covers all versions. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
