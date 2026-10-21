@@ -266,11 +266,21 @@ class SyncManager @Inject constructor(
     /**
      * Fuerza una nueva sincronización, reemplazando cualquier trabajo de sincronización
      * existente. Ideal para el botón de "Refrescar Biblioteca".
+     *
+     * BUG FIX (#2704, #2703): 'New songs don't show up after download.'
+     * Previously forceRefresh() used incrementalSyncWork which relies on
+     * DATE_ADDED > lastSyncTimestamp. If the MediaStore assigns the same
+     * timestamp to multiple files, or if the lastSyncTimestamp was set
+     * after the files were added but before the MediaStore indexed them,
+     * the incremental sync misses the new files.
+     * Fix: forceRefresh now uses fullSyncWork() which ignores the timestamp
+     * and re-scans the entire MediaStore. This is slower but guarantees
+     * new files are found.
      */
     fun forceRefresh() {
-        Log.i(TAG, "Force refresh requested - Scheduling incremental worker")
+        Log.i(TAG, "Force refresh requested - Scheduling FULL sync (not incremental) to catch missed files")
         enqueueSyncWork(
-            request = SyncWorker.incrementalSyncWork(runMaintenance = false),
+            request = SyncWorker.fullSyncWork(),
             policy = ExistingWorkPolicy.REPLACE
         )
     }
